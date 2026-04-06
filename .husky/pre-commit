@@ -1,0 +1,31 @@
+#!/bin/sh
+# Pre-commit hook — runs ESLint and Prettier checks on both apps.
+# If any check fails, the commit is blocked and the errors are shown.
+#
+# "set -e" means: exit immediately if any command returns a non-zero exit code.
+# Without this, the script would continue even after a failure.
+set -e
+
+echo ""
+echo "Running pre-commit checks..."
+echo ""
+
+# ─── Backend ──────────────────────────────────────────────────────────────────
+echo "→ [Backend] Prettier check..."
+# The parentheses ( ) create a subshell — cd applies only inside it, so the
+# working directory of the outer script is unchanged after this block.
+(cd backend && npx prettier --check "src/**/*.ts" "test/**/*.ts")
+
+echo "→ [Backend] ESLint..."
+(cd backend && npm run lint --silent)
+
+# ─── Frontend ─────────────────────────────────────────────────────────────────
+echo "→ [Frontend] Prettier check..."
+(cd frontend && npx prettier --check "src/**/*.{ts,tsx}")
+
+echo "→ [Frontend] ESLint..."
+(cd frontend && npx eslint "src/**/*.{ts,tsx}" --max-warnings 0)
+
+echo ""
+echo "All checks passed. Proceeding with commit."
+echo ""

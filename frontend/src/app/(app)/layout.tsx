@@ -1,5 +1,5 @@
-import { Sidebar } from "@/components/layout/Sidebar"
-import { TopBar } from "@/components/layout/TopBar"
+import { Sidebar } from "@/components/layout/Sidebar";
+import { TopBar } from "@/components/layout/TopBar";
 
 // This layout wraps all pages inside the (app) route group.
 // It's a SERVER component — it renders the shell (sidebar + topbar) on the server,
@@ -22,5 +22,5 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <main className="flex-1 overflow-auto p-6">{children}</main>
       </div>
     </div>
-  )
+  );
 }

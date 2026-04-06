@@ -1,12 +1,12 @@
-import { Module } from "@nestjs/common"
-import { ConfigModule } from "@nestjs/config"
-import { DatabaseModule } from "./database/database.module"
-import { PersonsModule } from "./persons/persons.module"
-import { InvestmentsModule } from "./investments/investments.module"
-import { ExpensesModule } from "./expenses/expenses.module"
-import { StatementsModule } from "./statements/statements.module"
-import { IncomeModule } from "./income/income.module"
-import { CategoriesModule } from "./categories/categories.module"
+import { Module } from "@nestjs/common";
+import { ConfigModule } from "@nestjs/config";
+import { DatabaseModule } from "./database/database.module";
+import { PersonsModule } from "./persons/persons.module";
+import { InvestmentsModule } from "./investments/investments.module";
+import { ExpensesModule } from "./expenses/expenses.module";
+import { StatementsModule } from "./statements/statements.module";
+import { IncomeModule } from "./income/income.module";
+import { CategoriesModule } from "./categories/categories.module";
 
 @Module({
   imports: [

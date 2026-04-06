@@ -1,5 +1,5 @@
-import { Module, Global } from "@nestjs/common"
-import { Pool } from "pg"
+import { Module, Global } from "@nestjs/common";
+import { Pool } from "pg";
 
 // @Global() makes this module's exports available everywhere without
 // needing to import DatabaseModule in every feature module.
@@ -18,7 +18,7 @@ import { Pool } from "pg"
           // Each request that hits the DB borrows one connection from the pool
           // and returns it when done. For a personal app, 10 is plenty.
           max: 10,
-        })
+        });
       },
     },
   ],

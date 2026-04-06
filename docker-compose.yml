@@ -59,7 +59,7 @@ services:
       - /app/.next
 
   cloudbeaver:
-    image: dpage/cloudbeaver:latest
+    image: dbeaver/cloudbeaver:latest
     container_name: pfa_cloudbeaver
     restart: unless-stopped
     depends_on:

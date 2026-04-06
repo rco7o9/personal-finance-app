@@ -1,6 +1,6 @@
-import { Controller, Get, Post, Body } from "@nestjs/common"
-import { PersonsService } from "./persons.service"
-import { CreatePersonDto } from "./dto/create-person.dto"
+import { Controller, Get, Post, Body } from "@nestjs/common";
+import { PersonsService } from "./persons.service";
+import { CreatePersonDto } from "./dto/create-person.dto";
 
 // @Controller("persons") sets the route prefix — all methods here are under /persons
 @Controller("persons")
@@ -12,7 +12,7 @@ export class PersonsController {
   // GET /persons
   @Get()
   findAll() {
-    return this.personsService.findAll()
+    return this.personsService.findAll();
   }
 
   // POST /persons
@@ -20,6 +20,6 @@ export class PersonsController {
   // If validation fails, NestJS returns 400 before this method is even called.
   @Post()
   create(@Body() dto: CreatePersonDto) {
-    return this.personsService.create(dto)
+    return this.personsService.create(dto);
   }
 }

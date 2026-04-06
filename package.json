@@ -1,0 +1,11 @@
+{
+  "name": "personal-finance-app",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "husky": "^9.1.7"
+  }
+}

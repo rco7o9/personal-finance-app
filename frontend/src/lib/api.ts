@@ -16,21 +16,21 @@
 const baseUrl =
   typeof window === "undefined"
     ? process.env.API_URL // server-side (Docker network)
-    : process.env.NEXT_PUBLIC_API_URL // client-side (browser)
+    : process.env.NEXT_PUBLIC_API_URL; // client-side (browser)
 
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${baseUrl}${path}`, {
     // next.revalidate: 0 disables Next.js's fetch caching for this call.
     // During development, always get fresh data. We can tune this per-route later.
     next: { revalidate: 0 },
-  })
+  });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ message: res.statusText }))
-    throw new Error(error.message ?? `API error ${res.status}`)
+    const error = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(error.message ?? `API error ${res.status}`);
   }
 
-  return res.json() as Promise<T>
+  return res.json() as Promise<T>;
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
@@ -38,14 +38,14 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  })
+  });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ message: res.statusText }))
-    throw new Error(error.message ?? `API error ${res.status}`)
+    const error = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(error.message ?? `API error ${res.status}`);
   }
 
-  return res.json() as Promise<T>
+  return res.json() as Promise<T>;
 }
 
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
@@ -53,12 +53,12 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-  })
+  });
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ message: res.statusText }))
-    throw new Error(error.message ?? `API error ${res.status}`)
+    const error = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(error.message ?? `API error ${res.status}`);
   }
 
-  return res.json() as Promise<T>
+  return res.json() as Promise<T>;
 }

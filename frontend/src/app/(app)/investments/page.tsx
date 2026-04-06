@@ -1,16 +1,16 @@
 export default async function InvestmentsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ personId?: string }>
+  searchParams: Promise<{ personId?: string }>;
 }) {
-  const { personId } = await searchParams
+  const { personId } = await searchParams;
 
   return (
     <div>
       <h2 className="text-2xl font-semibold tracking-tight">Investments</h2>
-      <p className="mt-1 text-sm text-muted-foreground">
+      <p className="text-muted-foreground mt-1 text-sm">
         Viewing as person ID: {personId ?? "none selected"}
       </p>
     </div>
-  )
+  );
 }

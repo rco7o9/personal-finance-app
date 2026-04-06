@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 // This is a CLIENT component ("use client" at the top).
 // Why? Because it uses usePathname() — a hook that reads the current URL
@@ -6,26 +6,26 @@
 // The rest of the sidebar (links, icons) is static, but this one dynamic
 // piece forces the whole component to be a client component.
 
-import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { LayoutDashboard, TrendingUp, Receipt, FileText } from "lucide-react"
-import { cn } from "@/lib/utils"
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { LayoutDashboard, TrendingUp, Receipt, FileText } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/investments", label: "Investments", icon: TrendingUp },
   { href: "/expenses", label: "Expenses", icon: Receipt },
   { href: "/statements", label: "Statements", icon: FileText },
-]
+];
 
 export function Sidebar() {
-  const pathname = usePathname()
+  const pathname = usePathname();
 
   return (
-    <aside className="flex h-full w-56 flex-col border-r bg-sidebar px-3 py-4">
+    <aside className="bg-sidebar flex h-full w-56 flex-col border-r px-3 py-4">
       <div className="mb-6 px-2">
         <h1 className="text-lg font-semibold tracking-tight">Finance Tracker</h1>
-        <p className="text-xs text-muted-foreground">Arjun & Priya</p>
+        <p className="text-muted-foreground text-xs">Arjun & Priya</p>
       </div>
 
       <nav className="flex flex-col gap-1">
@@ -46,5 +46,5 @@ export function Sidebar() {
         ))}
       </nav>
     </aside>
-  )
+  );
 }
