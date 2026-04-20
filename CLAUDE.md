@@ -18,6 +18,7 @@
 - Next.js: server components `await fetch(...)` to NestJS. Mark `"use client"` only for `useState`, `useEffect`, event handlers, or browser APIs
 - Server components read `personId` from `searchParams` prop — never from `localStorage`. Links must preserve `?personId=X`. See ADR-003.
 - All business logic lives in `backend/` — never in Next.js server actions or API routes. See ADR-001.
+- All database table and column names use `snake_case` — no camelCase or PascalCase in SQL
 
 ## Commands
 
@@ -70,3 +71,4 @@ Invoke it explicitly before every commit: "apply the git-workflow-and-versioning
 - When a new architectural decision is made, write a new ADR in `docs/decisions/` immediately
 - Never modify existing ADRs — supersede with a new numbered ADR that references the old one
 - Use `/start-feature` at the start of each session and `/end-session` at the end
+- Update `docs/system.md` at the end of every session (via `/end-session`) after changes are verified — not during implementation
