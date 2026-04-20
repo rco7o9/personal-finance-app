@@ -1,0 +1,238 @@
+# System Documentation — Personal Finance Tracker
+
+> Last updated: 2026-04-20 (session 2 — schema verified)
+> Update this file at the end of every session via `/end-session` after verifying changes.
+
+---
+
+## 1. Project Aim
+
+A private, local-only household finance tracker for two people (Arjun & Priya).
+The system ingests bank and investment statements, classifies transactions with AI
+assistance, and provides portfolio, expense, and investment reporting.
+
+No authentication — this is a personal tool running inside Docker on a private machine.
+Person selection (Arjun vs Priya) is a UI convenience for data attribution, not a
+security boundary.
+
+---
+
+## 2. Planned Phases
+
+| Phase | Status    | Description |
+|-------|-----------|-------------|
+| 1 — Foundation        | ✅ Done   | Docker Compose, NestJS + Next.js scaffolds, pre-commit hooks |
+| 1b — DB Schema        | 🔜 Next   | `001_init.sql`: all enums, tables, seed data |
+| 2 — Portfolio view    | Pending   | Portfolio overview, XIRR, allocation vs target, live prices |
+| 3 — Statement ingestion | Pending | Upload PDF/CSV → Claude AI parse → HITL review → commit |
+| 4 — Expense reporting | Pending   | Monthly + YTD views, budget vs actual, per-person attribution |
+| 5 — Investment reporting | Pending | Monthly invested by asset class, deficit/surplus tracker |
+| 6 — Intelligence layer | Pending  | Projections, rebalancing suggestions, agentic insights |
+
+---
+
+## 3. Tech Stack
+
+| Layer      | Technology                              | Port  |
+|------------|-----------------------------------------|-------|
+| Backend    | NestJS (TypeScript)                     | 3001  |
+| Frontend   | Next.js App Router (TypeScript)         | 3000  |
+| Database   | PostgreSQL                              | 5432  |
+| DB GUI     | CloudBeaver                             | 8978  |
+| Runtime    | Docker Compose (all four services)      | —     |
+
+**Key libraries:**
+- `node-postgres` (`pg`) — raw SQL queries, no ORM
+- `pgtyped` — generates TypeScript types from SQL queries
+- `decimal.js` — all monetary arithmetic (never `parseFloat` on NUMERIC columns)
+
+---
+
+## 4. Architecture
+
+```
+Browser
+  │
+  ▼
+Next.js :3000  (UI only — server + client components)
+  │  server components: fetch() via Docker-internal http://backend:3001
+  │  client components: fetch() via http://localhost:3001
+  ▼
+NestJS :3001   (all business logic, validation, DB access)
+  │
+  ▼
+PostgreSQL :5432
+```
+
+**Rules:**
+- All business logic lives in NestJS — never in Next.js server actions or API routes
+- No direct DB access from the frontend ever
+- Server components read `personId` from `searchParams` prop (not localStorage)
+- Every link between pages must preserve `?personId=X`
+
+**NestJS module pattern:**
+```
+src/<domain>/
+  <domain>.module.ts
+  <domain>.controller.ts   — HTTP layer only
+  <domain>.service.ts      — DB queries + business logic
+  dto/
+    create-<domain>.dto.ts
+```
+
+`DatabaseModule` is `@Global()` — its `DB_POOL` (pg.Pool) is injectable everywhere
+without re-importing.
+
+---
+
+## 5. Data Model
+
+> Status: ✅ Verified — `001_init.sql` applied and round-trip tested (migrate:up → down → up) on 2026-04-20.
+
+### 5.1 Enums
+
+| Enum                    | Values                                             |
+|-------------------------|----------------------------------------------------|
+| `transaction_status`    | `pending`, `confirmed`, `edited`, `excluded`       |
+| `ledger_statement_type` | `savings_account`, `credit_card`                   |
+| `income_type`           | `salary`, `bonus`, `savings_interest`              |
+| `price_source`          | `yahoo_finance`, `amfi`, `coinmarketcap`, `manual` |
+
+`income_type` is designed to grow via `ALTER TYPE ... ADD VALUE`.
+
+### 5.2 Reference / lookup tables
+
+**`home`** — household entity grouping persons
+- `id`, `name`
+
+**`person`** — Arjun & Priya
+- `id`, `name`, `home_id → home`
+
+**`currency`** — INR and USD at launch
+- `id`, `code` (UNIQUE), `symbol`
+
+**`financial_institution`** — banks and investment platforms in one table
+- `id`, `name` (UNIQUE)
+- Covers: HDFC Bank, Axis Bank, ICICI Bank, Zerodha, INDMoney, PayTM Money,
+  CoinSwitch, Kuvera, Groww, Employer stock
+
+**`expense_category`** — with display priority
+- `id`, `name` (UNIQUE), `priority INT`
+
+**`investment_category`** — asset class taxonomy
+- `id`, `name` (UNIQUE)
+- Values: US Equity, Indian Equity, Mutual Fund, ETF, Crypto, RSU, Liquid Fund,
+  Gold, Fixed Deposit, PPF / NPS
+
+**`asset`** — one row per investable instrument
+- `id`, `name`, `investment_category_id`, `ticker_symbol`, `exchange`,
+  `price_source`, `currency_id`
+- `ticker_symbol`, `exchange`, `price_source` nullable (manual assets)
+
+### 5.3 Statement tables
+
+**`ledger_statement`** — one per uploaded bank / credit card PDF or CSV
+- `id`, `person_id`, `financial_institution_id`, `type` (ledger_statement_type),
+  `start_date`, `end_date`, `file_url`
+
+**`investment_statement`** — one per uploaded investment statement; one per category
+- `id`, `person_id`, `financial_institution_id`, `investment_category_id`,
+  `start_date`, `end_date`, `file_url`
+
+### 5.4 Transaction tables
+
+**`expense`**
+- `id`, `person_id`, `category_id`, `ledger_statement_id` (nullable — manual entries),
+  `amount NUMERIC(18,4)`, `currency_id`, `date`, `description`, `status`
+
+**`income`**
+- `id`, `person_id`, `ledger_statement_id` (nullable), `date` (exact transaction date),
+  `type` (income_type), `amount NUMERIC(18,4)`, `currency_id`, `description`, `status`
+
+**`investment`** — each row is a buy lot
+- `id`, `person_id`, `asset_id`, `financial_institution_id` (denormalized for
+  portfolio-by-platform queries), `investment_statement_id` (nullable),
+  `quantity NUMERIC(18,8)`, `price NUMERIC(18,4)`, `currency_id`, `date`
+- Sell columns (all nullable, support partial sales):
+  `sold_date`, `sold_quantity NUMERIC(18,8)`, `sold_at_price NUMERIC(18,4)`,
+  `realised_value NUMERIC(18,4)` (positive = gain, negative = loss)
+- `status`
+
+### 5.5 Baseline / target tables
+
+**`income_baseline`** — expected monthly income per person (for surplus calculation)
+- `id`, `person_id`, `month DATE` (first of month), `type` (income_type),
+  `amount NUMERIC(18,4)`
+
+**`expense_category_baseline`** — monthly budget per category per person
+- `id`, `category_id`, `person_id`, `month DATE` (first of month),
+  `amount NUMERIC(18,4)`
+
+**`portfolio_allocation_target`** — yearly target allocation % per asset class
+- `id`, `investment_category_id`, `start_date DATE`, `end_date DATE`
+  (financial year range, e.g. 2026-04-01 → 2027-03-31),
+  `target_percentage NUMERIC(5,2)`
+
+### 5.6 Key constraints and conventions
+
+- Money: `NUMERIC(18,4)` — never FLOAT
+- Quantities: `NUMERIC(18,8)`
+- `NUMERIC` comes back as JS strings from node-postgres — use `decimal.js`
+- Month columns: `DATE` stored as first of month (e.g. `2026-04-01`)
+- All reporting queries must filter `WHERE status = 'confirmed'`
+- `ledger_statement_id` and `investment_statement_id` are nullable to allow
+  manual entry without an uploaded statement
+
+### 5.7 Entity relationship summary
+
+```
+home
+ └── person (many)
+      ├── ledger_statement (many)  →  financial_institution
+      │    ├── expense (many)      →  expense_category, currency
+      │    └── income (many)       →  currency
+      ├── investment_statement (many) → financial_institution, investment_category
+      │    └── investment (many)   →  asset → investment_category
+      │                                    → currency (native price)
+      │                            →  financial_institution (denorm)
+      │                            →  currency (trade currency)
+      ├── income_baseline (many)
+      ├── expense_category_baseline (many) → expense_category
+      └── portfolio_allocation_target (per investment_category, per FY range)
+```
+
+---
+
+## 6. API Endpoints
+
+> Not yet defined — will be populated as NestJS controllers are built in Phase 2+.
+
+---
+
+## 7. UI Screens
+
+Six screens planned (wireframes at `wireframes.html`):
+
+1. **Expense ingestion** — upload bank/credit card PDF, HITL review with confirm/edit/exclude per row
+2. **Investment ingestion** — upload investment statement PDF, HITL review
+3. **Expenses report** — monthly/YTD spend, category breakdown, Arjun vs Priya, budget vs actual
+4. **Investments report** — monthly totals by asset class, investment entries table, deficit/surplus tracker
+5. **Portfolio overview** — total value, XIRR, actual vs target allocation, by-platform cards, rebalancing suggestions
+6. **Asset breakup** — per-asset drill-down: lots, price history, P&L, lot-wise XIRR
+
+Portfolio values (current price, unrealised gain, XIRR) are computed at runtime by
+fetching live prices — no price snapshot table in the schema.
+
+---
+
+## 8. ADR Index
+
+| ADR     | Title                                                                        |
+|---------|------------------------------------------------------------------------------|
+| ADR-001 | Monorepo with two independent apps (NestJS + Next.js)                        |
+| ADR-002 | No ORM — raw SQL via node-postgres with pgtyped for type safety              |
+| ADR-003 | No auth — personId via localStorage and URL parameter                        |
+| ADR-004 | Staging via status enum on main tables, not separate staging tables          |
+| ADR-005 | Money as NUMERIC(18,4), quantities as NUMERIC(18,8) — never FLOAT            |
+| ADR-006 | Docker Compose as the sole development environment                           |
+| ADR-007 | Portfolio values computed at runtime via live price fetching — no snapshot table |
