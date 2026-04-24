@@ -1,0 +1,334 @@
+import { Injectable, Inject } from "@nestjs/common";
+import { Pool } from "pg";
+import Decimal from "decimal.js";
+import { AssetPriceService, AssetPriceRow } from "../asset-price/asset-price.service";
+
+type PositionRow = {
+  asset_id: number;
+  asset_name: string;
+  ticker_symbol: string | null;
+  price_source: string | null;
+  category_id: number;
+  category_name: string;
+  platform: string;
+  quantity: string;
+  total_invested: string;
+  current_price: string | null;
+};
+
+type AllocationTargetRow = {
+  category_id: number;
+  category_name: string;
+  target_percentage: string;
+};
+
+type HoldingRow = {
+  asset_id: number;
+  asset_name: string;
+  ticker_symbol: string | null;
+  price_source: string | null;
+  quantity: string;
+  avg_cost: string;
+  total_invested: string;
+  current_price: string | null;
+};
+
+type LotRow = {
+  id: number;
+  date: Date;
+  type: string;
+  quantity: string;
+  price: string;
+  amount: string;
+};
+
+type AssetListRow = {
+  id: number;
+  name: string;
+  asset_class: string;
+  platform: string;
+};
+
+const SUGGESTION_THRESHOLD = new Decimal("3");
+
+@Injectable()
+export class PortfolioService {
+  constructor(
+    @Inject("DB_POOL") private readonly pool: Pool,
+    private readonly assetPriceService: AssetPriceService,
+  ) {}
+
+  async getSummary(personId: number) {
+    const [positions, targets] = await Promise.all([
+      this.queryPositions(personId),
+      this.queryTargets(),
+    ]);
+
+    const priceMap = await this.fetchPrices(positions);
+    const targetMap = new Map(targets.map((t) => [t.category_id, t]));
+
+    // Compute current value per position
+    const positionsWithValue = positions.map((p) => ({
+      ...p,
+      currentValue: this.computeCurrentValue(p, priceMap),
+    }));
+
+    const totalValue = positionsWithValue.reduce(
+      (sum, p) => (p.currentValue ? sum.add(p.currentValue) : sum),
+      new Decimal(0),
+    );
+
+    const byAssetClass = this.groupByAssetClass(positionsWithValue, totalValue, targetMap);
+
+    const byPlatform = this.groupByPlatform(positionsWithValue);
+
+    const rebalancingSuggestions = byAssetClass
+      .filter((c) => c.delta !== null && new Decimal(c.delta).abs().gt(SUGGESTION_THRESHOLD))
+      .map((c) => {
+        const delta = new Decimal(c.delta!);
+        return {
+          tag: delta.gt(0) ? "overweight" : "underweight",
+          assetClass: c.assetClass,
+          actualPct: c.percentage,
+          targetPct: c.targetPercentage!,
+          message: `${c.assetClass} is ${delta.abs().toFixed(2)}% ${delta.gt(0) ? "above" : "below"} target`,
+        };
+      });
+
+    return {
+      totalValue: totalValue.toFixed(2),
+      byAssetClass,
+      byPlatform,
+      rebalancingSuggestions,
+    };
+  }
+
+  async getAssets(personId: number) {
+    const result = await this.pool.query<AssetListRow>(
+      `SELECT DISTINCT ON (a.id)
+         a.id,
+         a.name,
+         ic.name AS asset_class,
+         fi.name AS platform
+       FROM investment_transaction it
+       JOIN asset a ON a.id = it.asset_id
+       JOIN investment_category ic ON ic.id = a.investment_category_id
+       JOIN financial_institution fi ON fi.id = it.financial_institution_id
+       WHERE it.person_id = $1 AND it.status = 'confirmed'
+       ORDER BY a.id`,
+      [personId],
+    );
+
+    return result.rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      assetClass: r.asset_class,
+      platform: r.platform,
+    }));
+  }
+
+  async getAssetDetail(assetId: number, personId: number) {
+    const [holdingRes, lotsRes] = await Promise.all([
+      this.pool.query<HoldingRow>(
+        `SELECT
+           a.id AS asset_id,
+           a.name AS asset_name,
+           a.ticker_symbol,
+           a.price_source,
+           h.quantity::text,
+           h.avg_cost::text,
+           h.total_invested::text,
+           h.current_price::text
+         FROM holding h
+         JOIN asset a ON a.id = h.asset_id
+         WHERE h.asset_id = $1`,
+        [assetId],
+      ),
+      this.pool.query<LotRow>(
+        `SELECT id, transacted_at AS date, type,
+                quantity::text, price::text, amount::text
+         FROM investment_transaction
+         WHERE asset_id = $1 AND person_id = $2 AND status = 'confirmed'
+         ORDER BY transacted_at DESC`,
+        [assetId, personId],
+      ),
+    ]);
+
+    const h = holdingRes.rows[0];
+    if (!h) return null;
+
+    const priceRow: AssetPriceRow = {
+      id: h.asset_id,
+      ticker_symbol: h.ticker_symbol,
+      price_source: h.price_source as AssetPriceRow["price_source"],
+    };
+
+    const fetchedPrice = await this.assetPriceService.getPriceInr(priceRow);
+    const currentPrice = fetchedPrice ?? (h.current_price ? new Decimal(h.current_price) : null);
+
+    const qty = new Decimal(h.quantity);
+    const totalInvested = new Decimal(h.total_invested);
+    const currentValue = currentPrice ? qty.mul(currentPrice) : null;
+    const unrealisedGain = currentValue ? currentValue.sub(totalInvested) : null;
+    const absoluteReturnPct =
+      unrealisedGain && totalInvested.gt(0) ? unrealisedGain.div(totalInvested).mul(100) : null;
+
+    const lots = lotsRes.rows.map((lot) => {
+      const lotValue = currentPrice ? new Decimal(lot.quantity).mul(currentPrice) : null;
+      return {
+        id: lot.id,
+        date: lot.date,
+        type: lot.type,
+        units: lot.quantity,
+        buyPrice: lot.price,
+        cost: lot.amount,
+        currentValue: lotValue ? lotValue.toFixed(2) : null,
+        xirr: null,
+      };
+    });
+
+    return {
+      assetName: h.asset_name,
+      currentValue: currentValue ? currentValue.toFixed(2) : null,
+      totalUnits: h.quantity,
+      avgCost: h.avg_cost,
+      unrealisedGain: unrealisedGain ? unrealisedGain.toFixed(2) : null,
+      absoluteReturnPct: absoluteReturnPct ? absoluteReturnPct.toFixed(2) : null,
+      xirr: null,
+      lots,
+    };
+  }
+
+  // ── private helpers ──────────────────────────────────────────────────────
+
+  private async queryPositions(personId: number): Promise<PositionRow[]> {
+    const result = await this.pool.query<PositionRow>(
+      `SELECT
+         a.id                                                                        AS asset_id,
+         a.name                                                                      AS asset_name,
+         a.ticker_symbol,
+         a.price_source::text,
+         ic.id                                                                       AS category_id,
+         ic.name                                                                     AS category_name,
+         fi.name                                                                     AS platform,
+         SUM(CASE WHEN it.type = 'buy' THEN it.quantity ELSE -it.quantity END)::text AS quantity,
+         SUM(CASE WHEN it.type = 'buy' THEN it.amount  ELSE -it.amount  END)::text  AS total_invested,
+         h.current_price::text
+       FROM investment_transaction it
+       JOIN asset a ON a.id = it.asset_id
+       JOIN investment_category ic ON ic.id = a.investment_category_id
+       JOIN financial_institution fi ON fi.id = it.financial_institution_id
+       LEFT JOIN holding h ON h.asset_id = a.id
+       WHERE it.person_id = $1 AND it.status = 'confirmed'
+       GROUP BY a.id, a.name, a.ticker_symbol, a.price_source,
+                ic.id, ic.name, fi.name, h.current_price
+       HAVING SUM(CASE WHEN it.type = 'buy' THEN it.quantity ELSE -it.quantity END) > 0
+       ORDER BY ic.name, a.name`,
+      [personId],
+    );
+    return result.rows;
+  }
+
+  private async queryTargets(): Promise<AllocationTargetRow[]> {
+    const result = await this.pool.query<AllocationTargetRow>(
+      `SELECT ic.id AS category_id, ic.name AS category_name,
+              pat.target_percentage::text
+       FROM portfolio_allocation_target pat
+       JOIN investment_category ic ON ic.id = pat.investment_category_id
+       WHERE pat.start_date <= CURRENT_DATE AND pat.end_date >= CURRENT_DATE`,
+    );
+    return result.rows;
+  }
+
+  private async fetchPrices(positions: PositionRow[]): Promise<Map<number, Decimal | null>> {
+    const unique = [...new Map(positions.map((p) => [p.asset_id, p])).values()];
+
+    const prices = await Promise.all(
+      unique.map((p) =>
+        this.assetPriceService.getPriceInr({
+          id: p.asset_id,
+          ticker_symbol: p.ticker_symbol,
+          price_source: p.price_source as AssetPriceRow["price_source"],
+        }),
+      ),
+    );
+
+    return new Map(unique.map((p, i) => [p.asset_id, prices[i]]));
+  }
+
+  private computeCurrentValue(
+    p: PositionRow,
+    priceMap: Map<number, Decimal | null>,
+  ): Decimal | null {
+    const qty = new Decimal(p.quantity);
+
+    if (p.price_source === "manual") {
+      return p.current_price ? qty.mul(new Decimal(p.current_price)) : null;
+    }
+
+    const price = priceMap.get(p.asset_id);
+    return price ? qty.mul(price) : null;
+  }
+
+  private groupByAssetClass(
+    positions: (PositionRow & { currentValue: Decimal | null })[],
+    totalValue: Decimal,
+    targetMap: Map<number, AllocationTargetRow>,
+  ) {
+    const map = new Map<number, { categoryName: string; value: Decimal }>();
+
+    for (const p of positions) {
+      if (!p.currentValue) continue;
+      const existing = map.get(p.category_id);
+      if (existing) {
+        existing.value = existing.value.add(p.currentValue);
+      } else {
+        map.set(p.category_id, {
+          categoryName: p.category_name,
+          value: p.currentValue,
+        });
+      }
+    }
+
+    return [...map.entries()].map(([categoryId, { categoryName, value }]) => {
+      const pct = totalValue.gt(0) ? value.div(totalValue).mul(100) : new Decimal(0);
+      const target = targetMap.get(categoryId);
+      const targetPct = target ? new Decimal(target.target_percentage) : null;
+      const delta = targetPct ? pct.sub(targetPct) : null;
+
+      return {
+        categoryId,
+        assetClass: categoryName,
+        value: value.toFixed(2),
+        percentage: pct.toFixed(2),
+        targetPercentage: targetPct ? targetPct.toFixed(2) : null,
+        delta: delta ? delta.toFixed(2) : null,
+      };
+    });
+  }
+
+  private groupByPlatform(positions: (PositionRow & { currentValue: Decimal | null })[]) {
+    const map = new Map<string, { platform: string; assetClass: string; value: Decimal }>();
+
+    for (const p of positions) {
+      if (!p.currentValue) continue;
+      const key = `${p.platform}||${p.category_name}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.value = existing.value.add(p.currentValue);
+      } else {
+        map.set(key, {
+          platform: p.platform,
+          assetClass: p.category_name,
+          value: p.currentValue,
+        });
+      }
+    }
+
+    return [...map.values()].map((e) => ({
+      platform: e.platform,
+      assetClass: e.assetClass,
+      value: e.value.toFixed(2),
+    }));
+  }
+}
