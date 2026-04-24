@@ -5,4 +5,6 @@ State your understanding of:
 - Current phase status (what is done, what is next)
 - What this session will work on
 - What this session will NOT touch (explicit scope boundary)
-Confirm scope with the user before doing anything else.
+- Confirm scope with the user before doing anything else
+- Once the scope is confirmed, activate /spec command
+

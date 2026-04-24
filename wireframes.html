@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Family Finance Tracker — UI Wireframes</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #ffffff; --bg2: #f5f4f0; --bg3: #eeede9;
+    --text: #1a1a18; --text2: #6b6a65; --text3: #9c9a93;
+    --border: rgba(0,0,0,0.12); --border2: rgba(0,0,0,0.22);
+    --info-bg: #e6f1fb; --info: #185fa5;
+    --success-bg: #eaf3de; --success: #3b6d11;
+    --warn-bg: #faeeda; --warn: #854f0b;
+    --danger-bg: #fcebeb; --danger: #a32d2d;
+    --radius: 8px; --radius-lg: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1e1e1c; --bg2: #282825; --bg3: #323230;
+      --text: #e8e6df; --text2: #a8a69f; --text3: #6e6c66;
+      --border: rgba(255,255,255,0.1); --border2: rgba(255,255,255,0.2);
+      --info-bg: #042c53; --info: #85b7eb;
+      --success-bg: #173404; --success: #97c459;
+      --warn-bg: #412402; --warn: #ef9f27;
+      --danger-bg: #501313; --danger: #f09595;
+    }
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg3); color: var(--text); padding: 24px; font-size: 14px; line-height: 1.5; }
+  .shell { max-width: 860px; margin: 0 auto; border: 0.5px solid var(--border); border-radius: var(--radius-lg); background: var(--bg); overflow: hidden; }
+  .shell-header { padding: 12px 16px; border-bottom: 0.5px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .shell-title { font-size: 14px; font-weight: 500; }
+  .shell-sub { font-size: 11px; color: var(--text3); margin-top: 1px; }
+  .wf-nav { display: flex; border-bottom: 0.5px solid var(--border); overflow-x: auto; padding: 0 14px; gap: 0; }
+  .wf-tab { padding: 9px 13px; font-size: 12px; cursor: pointer; border: none; background: none; color: var(--text2); border-bottom: 2px solid transparent; white-space: nowrap; font-family: inherit; transition: color .15s; }
+  .wf-tab.active { color: var(--text); border-bottom-color: var(--text); }
+  .wf-tab:hover { color: var(--text); }
+  #wfContent { padding: 16px; min-height: 460px; }
+
+  .wf-metric { background: var(--bg2); border-radius: var(--radius); padding: 12px 14px; }
+  .g4 { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 9px; margin-bottom: 14px; }
+  .g3 { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 9px; margin-bottom: 14px; }
+  .g2 { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; margin-bottom: 14px; }
+  @media (max-width: 600px) { .g4,.g3 { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+  .wf-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+  .wf-btn { padding: 5px 12px; font-size: 12px; border: 0.5px solid var(--border2); border-radius: var(--radius); background: var(--bg); color: var(--text); cursor: pointer; font-family: inherit; }
+  .wf-btn:hover { background: var(--bg2); }
+  .wf-btnp { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .wf-btnp:hover { opacity: .85; }
+  .wf-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .wf-table th { font-size: 10px; color: var(--text3); padding: 7px 10px; text-align: left; border-bottom: 0.5px solid var(--border); font-weight: 400; white-space: nowrap; letter-spacing: .03em; }
+  .wf-table td { padding: 9px 10px; border-bottom: 0.5px solid var(--border); color: var(--text); vertical-align: middle; }
+  .wf-table tr:last-child td { border-bottom: none; }
+  .wf-table tr:hover td { background: var(--bg2); }
+  .tag { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 10px; }
+  .tg { background: var(--success-bg); color: var(--success); }
+  .tb { background: var(--info-bg); color: var(--info); }
+  .tw { background: var(--warn-bg); color: var(--warn); }
+  .tr { background: var(--danger-bg); color: var(--danger); }
+  .tgr { background: var(--bg2); color: var(--text2); }
+  .sec { margin-bottom: 16px; }
+  .stitle { font-size: 10px; color: var(--text3); margin: 0 0 8px; letter-spacing: .04em; }
+  .wf-upload { border: 1.5px dashed var(--border2); border-radius: var(--radius-lg); padding: 24px; text-align: center; background: var(--bg2); margin-bottom: 10px; }
+  .wf-ph { border: 1.5px dashed var(--border); border-radius: var(--radius); background: var(--bg2); display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--text3); }
+  .wf-sel { font-size: 12px; padding: 5px 9px; border: 0.5px solid var(--border2); border-radius: var(--radius); background: var(--bg); color: var(--text); font-family: inherit; }
+  .wf-file { display: flex; align-items: center; gap: 9px; padding: 7px 10px; background: var(--bg2); border-radius: var(--radius); margin-bottom: 6px; font-size: 12px; }
+  .wf-prog { display: flex; align-items: center; gap: 10px; background: var(--bg2); border-radius: var(--radius); padding: 9px 12px; margin-bottom: 10px; font-size: 12px; }
+  .pbar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; width: 90px; }
+  .pfill { height: 100%; background: var(--text); border-radius: 2px; }
+  .alloc-r { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; }
+  .alloc-l { width: 100px; font-size: 11px; color: var(--text2); flex-shrink: 0; }
+  .alloc-w { flex: 1; height: 6px; background: var(--bg2); border-radius: 3px; position: relative; }
+  .alloc-a { height: 100%; border-radius: 3px; }
+  .alloc-t { position: absolute; top: -3px; width: 1.5px; height: 12px; background: var(--text3); border-radius: 1px; }
+  .alloc-p { width: 32px; text-align: right; font-size: 11px; color: var(--text3); }
+  .br { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
+  .bl { width: 110px; font-size: 11px; color: var(--text2); flex-shrink: 0; text-align: right; }
+  .bw { flex: 1; height: 18px; background: var(--bg2); border-radius: 3px; overflow: hidden; }
+  .bf { height: 100%; border-radius: 3px; background: var(--text); }
+  .bv { width: 64px; font-size: 11px; color: var(--text2); }
+  .pc { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px; }
+  .av { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="shell-header">
+    <div>
+      <div class="shell-title">Family Finance Tracker</div>
+      <div class="shell-sub">UI wireframe · 6 screens</div>
+    </div>
+    <span class="tag tb">Wireframe</span>
+  </div>
+  <div class="wf-nav" id="wfNav"></div>
+  <div id="wfContent"></div>
+</div>
+
+<script>
+const TABS = ['Expense ingestion','Investment ingestion','Expenses report','Investments report','Portfolio overview','Asset breakup'];
+let cur = 0;
+
+function renderNav() {
+  document.getElementById('wfNav').innerHTML = TABS.map((t,i) =>
+    `<button class="wf-tab${i===cur?' active':''}" onclick="go(${i})">${t}</button>`).join('');
+}
+
+function go(i) { cur=i; renderNav(); document.getElementById('wfContent').innerHTML=[s0,s1,s2,s3,s4,s5][i](); }
+
+function met(label,val,sub) {
+  return `<div class="wf-metric"><p style="margin:0 0 3px;font-size:11px;color:var(--text2)">${label}</p><p style="margin:0;font-size:18px;font-weight:500">${val}</p>${sub?`<p style="margin:3px 0 0;font-size:10px;color:var(--text3)">${sub}</p>`:''}</div>`;
+}
+function bchart(rows,color) {
+  return rows.map(([l,v,p])=>`<div class="br"><span class="bl">${l}</span><div class="bw"><div class="bf" style="width:${p}%;background:${color||'var(--text)'}"></div></div><span class="bv">${v}</span></div>`).join('');
+}
+function arow(label,act,tgt) {
+  const d=act-tgt,ok=Math.abs(d)<=3;
+  const c=ok?'var(--text)':d>0?'var(--warn)':'var(--info)';
+  return `<div class="alloc-r"><span class="alloc-l">${label}</span><div class="alloc-w"><div class="alloc-a" style="width:${act}%;background:${c}"></div><div class="alloc-t" style="left:${tgt}%"></div></div><span class="alloc-p">${act}%</span></div>`;
+}
+function srows(rows) {
+  return rows.map(r=>`<tr>${r.map((c,i)=>`<td style="${i===r.length-1?'text-align:right;font-variant-numeric:tabular-nums;':''}${i===0?'color:var(--text2);white-space:nowrap;':''}">${c}</td>`).join('')}</tr>`).join('');
+}
+function pcard(type,name,val,xirr) {
+  return `<div class="pc"><p style="margin:0 0 1px;font-size:10px;color:var(--text3)">${type}</p><p style="margin:0 0 2px;font-size:12px;font-weight:500">${name}</p><p style="margin:0 0 2px;font-size:15px;font-weight:500">${val}</p><p style="margin:0;font-size:10px;color:var(--success)">${xirr}</p></div>`;
+}
+function txrow(date,desc,amt,cat,catcls,who,conf,action) {
+  const dot=conf==='H'?'#22c55e':conf==='M'?'#f59e0b':'#ef4444';
+  const wstyle=who==='R'?`background:var(--info-bg);color:var(--info)`:`background:var(--success-bg);color:var(--success)`;
+  const act=action==='confirm'?`<button class="wf-btn" style="padding:3px 8px;font-size:10px">✓ Confirm</button>`
+    :action==='edit'?`<button class="wf-btn" style="padding:3px 8px;font-size:10px;color:var(--warn)">✎ Edit</button>`
+    :`<button class="wf-btn" style="padding:3px 8px;font-size:10px;color:var(--danger)">✗ Exclude</button>`;
+  return `<tr><td style="white-space:nowrap;color:var(--text2)">${date}</td><td>${desc}</td><td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap">${amt}</td><td><span class="tag ${catcls}">${cat}</span></td><td><span class="av" style="${wstyle}">${who}</span></td><td><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${dot}"></span></td><td>${act}</td></tr>`;
+}
+function invrow(date,asset,plat,type,units,price,amt,status) {
+  const act=status==='confirmed'?`<span class="tag tg">✓ Done</span>`
+    :status==='review'?`<button class="wf-btn" style="padding:3px 8px;font-size:10px;color:var(--warn)">✎ Edit</button>`
+    :`<button class="wf-btn" style="padding:3px 8px;font-size:10px">✓ Confirm</button>`;
+  return `<tr><td style="white-space:nowrap;color:var(--text2)">${date}</td><td style="font-weight:500">${asset}</td><td style="color:var(--text2)">${plat}</td><td><span class="tag tb">${type}</span></td><td style="text-align:right">${units}</td><td style="text-align:right">${price}</td><td style="text-align:right;font-variant-numeric:tabular-nums">${amt}</td><td>${act}</td></tr>`;
+}
+
+function s0() {
+  return `<div class="sec">
+    <div style="display:flex;gap:0;border:0.5px solid var(--border2);border-radius:var(--radius);width:fit-content;margin-bottom:12px;overflow:hidden">
+      <button class="wf-btn" style="border:none;border-radius:0;background:var(--bg2)">Bank statement</button>
+      <button class="wf-btn" style="border:none;border-left:0.5px solid var(--border2);border-radius:0">Credit card</button>
+    </div>
+    <div class="wf-upload">
+      <p style="font-size:20px;margin-bottom:4px">↑</p>
+      <p style="font-size:13px;color:var(--text2)">Drop HDFC bank statement PDF here</p>
+      <p style="font-size:11px;color:var(--text3);margin:3px 0 10px">PDF · CSV · up to 20 MB · Gemini parses automatically</p>
+      <button class="wf-btn">Browse files</button>
+    </div>
+    <div class="wf-file">
+      <span>📄</span><span style="flex:1">HDFC_Statement_Mar2026.pdf</span>
+      <span class="tag tg">Parsed · 47 txns</span><span style="font-size:10px;color:var(--text3)">2.1 MB</span>
+    </div>
+  </div>
+  <div class="sec">
+    <div class="wf-prog">
+      <span style="flex:1;font-weight:500">HITL Review — March 2026</span>
+      <span style="color:var(--text3)">8 of 47 reviewed</span>
+      <div class="pbar"><div class="pfill" style="width:17%"></div></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:11px;color:var(--text3)">
+      <span><span class="av" style="background:var(--info-bg);color:var(--info)">R</span> Arjun</span>
+      <span><span class="av" style="background:var(--success-bg);color:var(--success)">V</span> Priya</span>
+      <span style="margin-left:4px">● High confidence &nbsp;● Medium &nbsp;● Low</span>
+    </div>
+    <div class="wf-card" style="overflow-x:auto">
+      <table class="wf-table">
+        <thead><tr><th>Date</th><th>Description</th><th style="text-align:right">Amount</th><th>Category</th><th>Who</th><th>Conf.</th><th>Action</th></tr></thead>
+        <tbody>
+          ${txrow('01 Mar','Zepto – Groceries delivery','₹1,840','Groceries','tb','R','H','confirm')}
+          ${txrow('02 Mar','Amazon Pay UPI','₹3,290','Shopping','tb','V','M','edit')}
+          ${txrow('03 Mar','Salary Credit – Employer','₹2,14,000','Income ⚠','tw','R','H','exclude')}
+          ${txrow('05 Mar','Swiggy order','₹680','Food & dining','tb','R','H','confirm')}
+          ${txrow('07 Mar','HDFC Life INS EMI','₹12,500','Insurance','tb','R','H','confirm')}
+          ${txrow('09 Mar','Transfer to savings','₹50,000','Internal ⚠','tw','R','H','exclude')}
+          ${txrow('11 Mar','Ola ride','₹340','Transport','tb','V','H','confirm')}
+          ${txrow('12 Mar','Uniqlo','₹4,200','Shopping','tb','V','M','edit')}
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:11px;color:var(--text3)">
+      <span>8 confirmed · 0 edited · 2 excluded · 37 pending</span>
+      <div style="display:flex;gap:7px">
+        <button class="wf-btn">Skip all similar</button>
+        <button class="wf-btn wf-btnp">Commit 8</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function s1() {
+  return `<div class="sec">
+    <div class="wf-upload">
+      <p style="font-size:20px;margin-bottom:4px">↑</p>
+      <p style="font-size:13px;color:var(--text2)">Drop monthly investment statement PDF here</p>
+      <p style="font-size:11px;color:var(--text3);margin:3px 0 10px">INDMoney · Zerodha · PayTM Money consolidated statement</p>
+      <button class="wf-btn">Browse files</button>
+    </div>
+    <div class="wf-file">
+      <span>📄</span><span style="flex:1">INDMoney_Consolidated_Feb2026.pdf</span>
+      <span class="tag tg">Parsed · 6 entries</span>
+    </div>
+  </div>
+  <div class="sec">
+    <div class="wf-prog">
+      <span style="flex:1;font-weight:500">HITL Review — Investment entries</span>
+      <span style="color:var(--text3)">2 of 6 confirmed</span>
+      <div class="pbar"><div class="pfill" style="width:33%"></div></div>
+    </div>
+    <div class="wf-card" style="overflow-x:auto">
+      <table class="wf-table">
+        <thead><tr><th>Date</th><th>Asset</th><th>Platform</th><th>Type</th><th style="text-align:right">Units</th><th style="text-align:right">Price</th><th style="text-align:right">Amount</th><th>Action</th></tr></thead>
+        <tbody>
+          ${invrow('10 Feb','Microsoft Corp','INDMoney','US Equity','2.5','$480','₹99,600','confirmed')}
+          ${invrow('12 Feb','Parag Parikh Flexi Cap','PayTM Money','Mutual Fund','—','—','₹25,000','confirmed')}
+          ${invrow('14 Feb','Nifty50 ETF','Zerodha','ETF','18','₹2,480','₹44,640','pending')}
+          ${invrow('15 Feb','Bitcoin','CoinSwitch','Crypto','0.0012','₹68.4L','₹8,208','pending')}
+          ${invrow('18 Feb','Employer RSU Vest','Equity','RSU','120','$11.20','₹1,12,000','review')}
+          ${invrow('20 Feb','HDFC Liquid Fund','PayTM Money','Liquid Fund','—','—','₹50,000','pending')}
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:10px">
+      <button class="wf-btn">Review all</button>
+      <button class="wf-btn wf-btnp">Commit confirmed</button>
+    </div>
+  </div>`;
+}
+
+function s2() {
+  return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <select class="wf-sel"><option>March 2026</option><option>February 2026</option></select>
+    <div style="display:flex;gap:6px">
+      <button class="wf-btn" style="background:var(--bg2)">Monthly</button>
+      <button class="wf-btn">YTD</button>
+    </div>
+  </div>
+  <div class="g4">
+    ${met('Total spend','₹1,24,680','↑ 8% vs last month')}
+    ${met('Necessary','₹68,200','Housing · groceries · bills')}
+    ${met('Fixed','₹28,500','Insurance · EMIs · subs')}
+    ${met('Variable','₹27,980','Dining · shopping · travel')}
+  </div>
+  <div class="g2">
+    <div>
+      <p class="stitle">Category breakdown</p>
+      <div class="wf-card" style="padding:12px">
+        ${bchart([['Groceries','₹18,400',53],['Rent / EMI','₹45,000',100],['Food & dining','₹9,800',22],['Transport','₹4,200',9],['Shopping','₹14,800',33],['Insurance','₹12,500',28],['Utilities','₹4,900',11],['Misc','₹15,080',34]])}
+      </div>
+    </div>
+    <div>
+      <p class="stitle">Arjun vs Priya</p>
+      <div class="wf-card" style="padding:12px">
+        ${bchart([['Arjun','₹72,300',58],['Priya','₹38,200',31],['Joint','₹14,180',11]],'var(--info)')}
+        <div style="border-top:0.5px solid var(--border);margin:12px 0 10px"></div>
+        <p class="stitle">Budget vs actual</p>
+        ${[['Necessary','₹68.2k','₹70k',97],['Fixed','₹28.5k','₹28k',102],['Variable','₹28k','₹35k',80]].map(([l,a,t,p])=>{
+          const c=p>100?'var(--danger)':'var(--text)';
+          return `<div class="alloc-r"><span class="alloc-l">${l}</span><div class="alloc-w"><div class="alloc-a" style="width:${Math.min(p,100)}%;background:${c}"></div></div><span style="font-size:10px;color:${c};width:100px;text-align:right">${a} / ${t}</span></div>`;
+        }).join('')}
+      </div>
+    </div>
+  </div>
+  <div>
+    <p class="stitle">All transactions</p>
+    <div class="wf-card" style="overflow-x:auto">
+      <table class="wf-table">
+        <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Who</th><th style="text-align:right">Amount</th></tr></thead>
+        <tbody>${srows([['01 Mar','Zepto – Groceries','Groceries','R','₹1,840'],['05 Mar','Swiggy','Food & dining','R','₹680'],['07 Mar','HDFC Life INS','Insurance','R','₹12,500'],['11 Mar','Ola ride','Transport','V','₹340'],['12 Mar','Uniqlo','Shopping','V','₹4,200'],['15 Mar','BigBasket','Groceries','V','₹3,100'],['…','—','—','—','—']])}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function s3() {
+  return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <select class="wf-sel"><option>March 2026</option></select>
+    <div style="display:flex;gap:6px"><button class="wf-btn" style="background:var(--bg2)">Monthly</button><button class="wf-btn">YTD</button></div>
+  </div>
+  <div class="g4">
+    ${met('Total invested','₹3,39,448','This month')}
+    ${met('US Equity','₹99,600','INDMoney')}
+    ${met('Mutual Funds','₹75,000','PayTM Money')}
+    ${met('Liquid Funds','₹50,000','Buffer → deploy')}
+  </div>
+  <div class="sec">
+    <p class="stitle">Monthly investment trend — by asset class</p>
+    <div class="wf-ph" style="height:110px">Stacked bar chart — Jan · Feb · Mar (US Equity / Indian Equity / MF / Crypto / RSU)</div>
+  </div>
+  <div class="sec">
+    <p class="stitle">Investment entries this month</p>
+    <div class="wf-card" style="overflow-x:auto">
+      <table class="wf-table">
+        <thead><tr><th>Date</th><th>Asset</th><th>Platform</th><th>Type</th><th style="text-align:right">Units</th><th style="text-align:right">Avg price</th><th style="text-align:right">Amount</th></tr></thead>
+        <tbody>${srows([['10 Feb','Microsoft Corp','INDMoney','US Equity','2.5','$480','₹99,600'],['12 Feb','Parag Parikh Flexi Cap','PayTM Money','Mutual Fund','—','—','₹25,000'],['14 Feb','Nifty50 ETF','Zerodha','ETF','18','₹2,480','₹44,640'],['15 Feb','Bitcoin','CoinSwitch','Crypto','0.0012','₹68.4L','₹8,208'],['18 Feb','Employer RSU Vest','Equity','RSU','120','$11.20','₹1,12,000'],['20 Feb','HDFC Liquid Fund','PayTM Money','Liquid Fund','—','—','₹50,000']])}</tbody>
+      </table>
+    </div>
+  </div>
+  <div>
+    <p class="stitle">Deficit / surplus tracker</p>
+    <div class="wf-card" style="overflow-x:auto">
+      <table class="wf-table">
+        <thead><tr><th>Month</th><th style="text-align:right">Inflow</th><th style="text-align:right">Expenses</th><th style="text-align:right">Invested</th><th style="text-align:right">Surplus / deficit</th></tr></thead>
+        <tbody>${srows([['Jan 2026','₹3,14,000','₹1,18,200','₹1,60,000','+ ₹35,800'],['Feb 2026','₹3,14,000','₹1,24,680','₹1,70,000','+ ₹19,320'],['Mar 2026','₹3,14,000','₹1,24,680','₹3,39,448','– ₹1,50,128']])}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function s4() {
+  return `<div class="g2">
+    <div class="wf-metric" style="padding:18px">
+      <p style="margin:0 0 3px;font-size:11px;color:var(--text2)">Total portfolio value</p>
+      <p style="margin:0;font-size:28px;font-weight:500">₹1.25 Cr</p>
+      <p style="margin:3px 0 0;font-size:10px;color:var(--text3)">As of 01 Apr 2026</p>
+    </div>
+    <div class="wf-metric" style="padding:18px">
+      <p style="margin:0 0 3px;font-size:11px;color:var(--text2)">Overall XIRR</p>
+      <p style="margin:0;font-size:28px;font-weight:500;color:var(--success)">14.2%</p>
+      <p style="margin:3px 0 0;font-size:10px;color:var(--text3)">Since FY2024 · across all platforms</p>
+    </div>
+  </div>
+  <div class="g2">
+    <div>
+      <p class="stitle">Actual vs target allocation (| = target)</p>
+      <div class="wf-card" style="padding:12px">
+        ${arow('US Equity',42,40)}${arow('Indian Equity',18,20)}${arow('Mutual Funds',16,15)}${arow('RSUs (Employer)',10,10)}${arow('Liquid Funds',8,10)}${arow('Crypto',4,3)}${arow('Gold / Others',2,2)}
+        <p style="margin:10px 0 0;font-size:10px;color:var(--text3)">● Actual &nbsp;| Target &nbsp; Amber = over &nbsp; Blue = under</p>
+      </div>
+    </div>
+    <div>
+      <p class="stitle">By platform</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+        ${pcard('US Equity','INDMoney','₹68.4L','14.8% XIRR')}
+        ${pcard('RSU','Employer stock','₹16.3L','Mark-to-market')}
+        ${pcard('IN Equity','Zerodha','₹29.4L','11.2% XIRR')}
+        ${pcard('Mutual Funds','PayTM Money','₹26.1L','12.9% XIRR')}
+        ${pcard('Crypto','CoinSwitch','₹6.5L','38.4% XIRR')}
+        ${pcard('Cash buffer','HDFC Bank','₹13.0L','3.5% savings')}
+      </div>
+    </div>
+  </div>
+  <div>
+    <p class="stitle">Rebalancing suggestions</p>
+    <div class="wf-card" style="padding:12px">
+      <div style="display:flex;align-items:start;gap:8px;padding:8px 0;border-bottom:0.5px solid var(--border)">
+        <span class="tag tw">Overweight</span><span style="font-size:12px">US Equity at 42% vs 40% target — consider pausing INDMoney purchases for 1 month</span>
+      </div>
+      <div style="display:flex;align-items:start;gap:8px;padding:8px 0">
+        <span class="tag tb">Underweight</span><span style="font-size:12px">Indian Equity at 18% vs 20% target — Zerodha has ₹3.4L headroom</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function s5() {
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+    <select class="wf-sel" style="flex:1">
+      <option>Microsoft Corp (US Equity · INDMoney)</option>
+      <option>Parag Parikh Flexi Cap (MF)</option>
+      <option>Employer RSU</option>
+      <option>Nifty50 ETF (Zerodha)</option>
+    </select>
+  </div>
+  <div class="g4">
+    ${met('Current value','₹3,18,480','Microsoft Corp')}
+    ${met('Total units held','12.5','Across all lots')}
+    ${met('Avg cost','₹21,480','per unit')}
+    ${met('XIRR','18.4%','Since first buy')}
+  </div>
+  <div class="g2">
+    <div>
+      <p class="stitle">Price history with buy markers</p>
+      <div class="wf-ph" style="height:150px">Line chart — MSFT price (INR) · ↑ markers at each buy date</div>
+    </div>
+    <div>
+      <p class="stitle">P&L summary</p>
+      <div class="wf-card" style="padding:12px">
+        <div class="wf-metric" style="margin-bottom:8px">
+          <p style="margin:0 0 2px;font-size:11px;color:var(--text2)">Unrealised gain</p>
+          <p style="margin:0;font-size:20px;font-weight:500;color:var(--success)">+ ₹49,980</p>
+        </div>
+        <div class="wf-metric" style="margin-bottom:8px">
+          <p style="margin:0 0 2px;font-size:11px;color:var(--text2)">Absolute return</p>
+          <p style="margin:0;font-size:20px;font-weight:500;color:var(--success)">+ 18.6%</p>
+        </div>
+        <div class="wf-metric">
+          <p style="margin:0 0 2px;font-size:11px;color:var(--text2)">Allocation share</p>
+          <p style="margin:0;font-size:20px;font-weight:500">19.5% of portfolio</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div>
+    <p class="stitle">Purchase history — lot-wise XIRR</p>
+    <div class="wf-card" style="overflow-x:auto">
+      <table class="wf-table">
+        <thead><tr><th>Date</th><th>Type</th><th style="text-align:right">Units</th><th style="text-align:right">Buy price</th><th style="text-align:right">Cost</th><th style="text-align:right">Current value</th><th style="text-align:right">Lot XIRR</th></tr></thead>
+        <tbody>${srows([['Mar 2024','Buy','3.0','$352 / ₹29,340','₹88,200','₹1,12,400','24.1%'],['Jun 2024','Buy','2.5','$440 / ₹36,640','₹91,600','₹93,800','10.2%'],['Oct 2024','Buy','3.0','$420 / ₹35,000','₹1,05,000','₹1,12,280','8.4%'],['Feb 2026','Buy','2.5','$480 / ₹39,840','₹99,600','₹99,600','0.0%']])}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+renderNav(); go(0);
+</script>
+</body>
+</html>

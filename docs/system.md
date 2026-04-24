@@ -91,12 +91,15 @@ without re-importing.
 
 ### 5.1 Enums
 
-| Enum                    | Values                                             |
-|-------------------------|----------------------------------------------------|
-| `transaction_status`    | `pending`, `confirmed`, `edited`, `excluded`       |
-| `ledger_statement_type` | `savings_account`, `credit_card`                   |
-| `income_type`           | `salary`, `bonus`, `savings_interest`              |
-| `price_source`          | `yahoo_finance`, `amfi`, `coinmarketcap`, `manual` |
+| Enum                           | Values                                                              |
+|--------------------------------|---------------------------------------------------------------------|
+| `transaction_status`           | `pending`, `confirmed`, `edited`, `excluded`                        |
+| `ledger_statement_type`        | `savings_account`, `credit_card`                                    |
+| `income_type`                  | `salary`, `bonus`, `savings_interest`                               |
+| `price_source`                 | `yahoo_finance`, `amfi`, `coinmarketcap`, `metals_api`, `manual`    |
+| `investment_transaction_type`  | `buy`, `sell`, `dividend`                                           |
+| `investment_transaction_source`| `manual`, `seeded`, `imported`                                      |
+| `expense_transfer_type`        | `investment_platform`, `household_member`, `own_account`            |
 
 `income_type` is designed to grow via `ALTER TYPE ... ADD VALUE`.
 
@@ -126,8 +129,9 @@ without re-importing.
 
 **`asset`** — one row per investable instrument
 - `id`, `name`, `investment_category_id`, `ticker_symbol`, `exchange`,
-  `price_source`, `currency_id`
-- `ticker_symbol`, `exchange`, `price_source` nullable (manual assets)
+  `price_source`, `currency_id`, `subcategory`
+- `ticker_symbol`, `exchange`, `price_source`, `subcategory` nullable
+- `subcategory` provides finer classification within a category (e.g. `LARGECAP`, `FLEXICAP`, `INDEXFUND`, `INTL_EQUITY`)
 
 ### 5.3 Statement tables
 
@@ -143,20 +147,33 @@ without re-importing.
 
 **`expense`**
 - `id`, `person_id`, `category_id`, `ledger_statement_id` (nullable — manual entries),
-  `amount NUMERIC(18,4)`, `currency_id`, `date`, `description`, `status`
+  `amount NUMERIC(18,4)`, `currency_id`, `date`, `description`, `status`, `transfer_type`
+- `transfer_type` (`expense_transfer_type`) — NULL for regular expenses; set by AI parser
+  when a transfer to an investment platform, household member, or own account is detected.
+  Transfers are confirmed as `status = 'excluded'` and never appear in expense reports.
+  See ADR-011.
 
 **`income`**
 - `id`, `person_id`, `ledger_statement_id` (nullable), `date` (exact transaction date),
   `type` (income_type), `amount NUMERIC(18,4)`, `currency_id`, `description`, `status`
 
-**`investment`** — each row is a buy lot
-- `id`, `person_id`, `asset_id`, `financial_institution_id` (denormalized for
-  portfolio-by-platform queries), `investment_statement_id` (nullable),
-  `quantity NUMERIC(18,8)`, `price NUMERIC(18,4)`, `currency_id`, `date`
-- Sell columns (all nullable, support partial sales):
-  `sold_date`, `sold_quantity NUMERIC(18,8)`, `sold_at_price NUMERIC(18,4)`,
-  `realised_value NUMERIC(18,4)` (positive = gain, negative = loss)
-- `status`
+**`investment_transaction`** — immutable ledger, never UPDATE or DELETE (replaces `investment`)
+- `id`, `asset_id`, `person_id`, `financial_institution_id`, `investment_statement_id` (nullable),
+  `type` (investment_transaction_type: buy/sell/dividend), `quantity NUMERIC(18,8)`,
+  `price NUMERIC(18,4)`, `amount NUMERIC(18,4)` (quantity × price), `currency_id`,
+  `transacted_at DATE`, `status`, `is_seed BOOLEAN`, `source` (investment_transaction_source),
+  `notes`, `created_at`
+- Every BUY and SELL is a new row — partial sells work correctly
+- `is_seed = TRUE` and `source = 'seeded'` for inception-date seed rows (see ADR-012)
+- All XIRR inputs are derived from this table. See ADR-010.
+
+**`holding`** — derived state, household-wide (no `person_id`)
+- `id`, `asset_id` (UNIQUE), `quantity NUMERIC(18,8)`, `avg_cost NUMERIC(18,4)`,
+  `total_invested NUMERIC(18,4)`, `current_price NUMERIC(18,4)`, `current_value NUMERIC(18,4)`,
+  `updated_at`
+- Recomputed from `investment_transaction WHERE status = 'confirmed'` after every confirmation
+- `current_price` and `current_value` updated separately by price refresh
+- Not a ledger — safe to delete and recompute at any time. See ADR-010.
 
 ### 5.5 Baseline / target tables
 
@@ -188,17 +205,20 @@ without re-importing.
 ```
 home
  └── person (many)
-      ├── ledger_statement (many)  →  financial_institution
-      │    ├── expense (many)      →  expense_category, currency
-      │    └── income (many)       →  currency
-      ├── investment_statement (many) → financial_institution, investment_category
-      │    └── investment (many)   →  asset → investment_category
-      │                                    → currency (native price)
-      │                            →  financial_institution (denorm)
-      │                            →  currency (trade currency)
+      ├── ledger_statement (many)        →  financial_institution
+      │    ├── expense (many)            →  expense_category, currency
+      │    │   [transfer_type nullable]
+      │    └── income (many)             →  currency
+      ├── investment_statement (many)    →  financial_institution, investment_category
+      │    └── investment_transaction (many) → asset → investment_category, currency
+      │                                     → financial_institution
+      │                                     → currency (trade currency)
+      │        [is_seed, source, status]
       ├── income_baseline (many)
       ├── expense_category_baseline (many) → expense_category
       └── portfolio_allocation_target (per investment_category, per FY range)
+
+asset (1) ──→ holding (1, household-wide derived state)
 ```
 
 ---
@@ -227,12 +247,17 @@ fetching live prices — no price snapshot table in the schema.
 
 ## 8. ADR Index
 
-| ADR     | Title                                                                        |
-|---------|------------------------------------------------------------------------------|
-| ADR-001 | Monorepo with two independent apps (NestJS + Next.js)                        |
-| ADR-002 | No ORM — raw SQL via node-postgres with pgtyped for type safety              |
-| ADR-003 | No auth — personId via localStorage and URL parameter                        |
-| ADR-004 | Staging via status enum on main tables, not separate staging tables          |
-| ADR-005 | Money as NUMERIC(18,4), quantities as NUMERIC(18,8) — never FLOAT            |
-| ADR-006 | Docker Compose as the sole development environment                           |
+| ADR     | Title                                                                            |
+|---------|----------------------------------------------------------------------------------|
+| ADR-001 | Monorepo with two independent apps (NestJS + Next.js)                            |
+| ADR-002 | No ORM — raw SQL via node-postgres with pgtyped for type safety                  |
+| ADR-003 | No auth — personId via localStorage and URL parameter                            |
+| ADR-004 | Staging via status enum on main tables, not separate staging tables              |
+| ADR-005 | Money as NUMERIC(18,4), quantities as NUMERIC(18,8) — never FLOAT               |
+| ADR-006 | Docker Compose as the sole development environment                               |
 | ADR-007 | Portfolio values computed at runtime via live price fetching — no snapshot table |
+| ADR-008 | Price API choices (Finnhub, mfapi.in, CoinGecko, Metals-API, Frankfurter)       |
+| ADR-009 | In-memory price cache (Map, TTL 5 min, no Redis in Phase 2a)                    |
+| ADR-010 | Immutable ledger pattern: investment_transaction + holding replaces investment   |
+| ADR-011 | Internal transfer detection via transfer_type on expense                        |
+| ADR-012 | Portfolio inception date seeding strategy (April 1, 2026)                       |

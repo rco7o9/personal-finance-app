@@ -5,6 +5,9 @@
 - **Frontend:** Next.js App Router (TypeScript) — `frontend/` — port 3000
 - **Database:** PostgreSQL — raw SQL via `node-postgres` + `pgtyped` for types
 - **Dev environment:** Docker Compose (postgres, backend, frontend, cloudbeaver :8978)
+- **UI components:** shadcn/ui (component library built on Radix UI + Tailwind CSS)
+- **Charts:** Recharts (React charting library — use for all data visualisations)
+- **Styling:** Tailwind CSS (comes with shadcn/ui setup)
 
 ## Key Conventions
 - Semicolons required; double quotes; 2-space indent; trailing commas; 100-char line width
@@ -58,7 +61,7 @@ sh .husky/pre-commit            # runs automatically on git commit
 ```
 
 ## Memory
-- **Active phase note:** `.claude/notes/phase1-bootstrap.md`
+- **Active phase note:** `.claude/notes/phase2-portfolio-view.md`
 - **ADRs:** `docs/decisions/`
 
 ## Commit Rules
