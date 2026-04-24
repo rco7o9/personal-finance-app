@@ -29,3 +29,17 @@ export function formatMonth(date: string | Date): string {
 export function formatPercent(value: number, decimals = 2): string {
   return `${value.toFixed(decimals)}%`;
 }
+
+// Abbreviated currency: "₹1.23 Cr", "₹45.67 L", or full for small values
+export function formatCurrencyShort(amount: number | string): string {
+  const num = typeof amount === "string" ? parseFloat(amount) : amount;
+  if (num >= 1e7) return `₹${(num / 1e7).toFixed(2)} Cr`;
+  if (num >= 1e5) return `₹${(num / 1e5).toFixed(2)} L`;
+  return formatCurrency(num);
+}
+
+// Delta: "+12.34%" or "-5.67%"
+export function formatDelta(delta: string): string {
+  const n = parseFloat(delta);
+  return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
+}
