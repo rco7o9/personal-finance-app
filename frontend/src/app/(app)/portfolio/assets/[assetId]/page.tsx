@@ -31,7 +31,10 @@ export default async function AssetDetailPage({
         />
         <MetricCard label="Units Held" value={detail.totalUnits} />
         <MetricCard label="Avg Cost" value={formatCurrency(detail.avgCost)} />
-        <MetricCard label="XIRR" value="—" />
+        <MetricCard
+          label="XIRR"
+          value={detail.xirr ? formatPercent(parseFloat(detail.xirr)) : "—"}
+        />
       </div>
 
       {/* P&L summary */}
@@ -94,7 +97,9 @@ export default async function AssetDetailPage({
                   <td className="px-4 py-3 text-right">
                     {lot.currentValue ? formatCurrencyShort(lot.currentValue) : "—"}
                   </td>
-                  <td className="text-muted-foreground px-4 py-3 text-right">—</td>
+                  <td className="text-muted-foreground px-4 py-3 text-right">
+                    {lot.xirr ? formatPercent(parseFloat(lot.xirr)) : "—"}
+                  </td>
                 </tr>
               ))}
             </tbody>

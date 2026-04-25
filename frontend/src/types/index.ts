@@ -14,6 +14,7 @@ export type ExpensePriority = "necessary" | "fixed" | "variable";
 
 export type PortfolioSummary = {
   totalValue: string;
+  overallXirr: string | null;
   byAssetClass: AssetClassSummary[];
   byPlatform: PlatformSummary[];
   rebalancingSuggestions: RebalancingSuggestion[];
@@ -26,6 +27,7 @@ export type AssetClassSummary = {
   percentage: string;
   targetPercentage: string | null;
   delta: string | null;
+  xirr: string | null;
 };
 
 export type PlatformSummary = {
@@ -57,7 +59,7 @@ export type LotEntry = {
   buyPrice: string;
   cost: string;
   currentValue: string | null;
-  xirr: null;
+  xirr: string | null;
 };
 
 export type AssetDetail = {
@@ -67,6 +69,6 @@ export type AssetDetail = {
   avgCost: string;
   unrealisedGain: string | null;
   absoluteReturnPct: string | null;
-  xirr: null;
+  xirr: string | null;
   lots: LotEntry[];
 };

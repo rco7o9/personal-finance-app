@@ -21,7 +21,9 @@ export default async function PortfolioPage() {
           </div>
           <div className="mb-1">
             <p className="text-muted-foreground text-xs tracking-wide uppercase">XIRR</p>
-            <p className="text-muted-foreground mt-1 text-2xl font-semibold">—</p>
+            <p className="text-muted-foreground mt-1 text-2xl font-semibold">
+              {summary.overallXirr ? formatPercent(parseFloat(summary.overallXirr)) : "—"}
+            </p>
           </div>
           <div className="mb-1 ml-auto">
             <RefreshPrices />
