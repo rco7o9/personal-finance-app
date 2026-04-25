@@ -2,13 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import Decimal from "decimal.js";
 import { CurrencyService } from "./currency.service";
 
-export type PriceSource =
-  | "yahoo_finance"
-  | "amfi"
-  | "coinmarketcap"
-  | "metals_api"
-  | "manual"
-  | null;
+export type PriceSource = "yahoo_finance" | "amfi" | "coinmarketcap" | "gold_api" | "manual" | null;
 
 export type AssetPriceRow = {
   id: number;
@@ -60,8 +54,8 @@ export class AssetPriceService {
         return this.fetchAmfi(ticker);
       case "coinmarketcap":
         return this.fetchCoinGecko(ticker);
-      case "metals_api":
-        return this.fetchMetalsApi(ticker);
+      case "gold_api":
+        return this.fetchGoldApi(ticker);
       default:
         return null;
     }
@@ -107,18 +101,17 @@ export class AssetPriceService {
     return new Decimal(inrPrice);
   }
 
-  private async fetchMetalsApi(metalCode: string): Promise<Decimal | null> {
-    const apiKey = process.env.METALS_API_KEY;
-    const url = `https://metals-api.com/api/latest?access_key=${apiKey}&base=USD&symbols=${metalCode}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Metals-API HTTP ${res.status}`);
+  private async fetchGoldApi(metalSymbol: string): Promise<Decimal | null> {
+    const apiKey = process.env.GOLD_API_KEY;
+    const url = `https://www.goldapi.io/api/${metalSymbol}/INR`;
+    const res = await fetch(url, {
+      headers: { "x-access-token": apiKey ?? "", "Content-Type": "application/json" },
+    });
+    if (!res.ok) throw new Error(`GoldAPI HTTP ${res.status}`);
 
-    const data = (await res.json()) as { rates: Record<string, number> };
-    const rate = data.rates[metalCode];
-    if (!rate) return null;
+    const data = (await res.json()) as { price_gram_24k: number };
+    if (!data.price_gram_24k) return null;
 
-    // rate = troy ounces per USD → invert for USD per troy oz, then to INR per gram
-    const usdToInr = await this.currencyService.getUsdToInr();
-    return new Decimal(1).div(rate).mul(usdToInr).div(new Decimal("31.1035"));
+    return new Decimal(data.price_gram_24k);
   }
 }

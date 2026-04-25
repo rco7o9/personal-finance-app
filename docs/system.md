@@ -1,6 +1,6 @@
 # System Documentation — Personal Finance Tracker
 
-> Last updated: 2026-04-20 (session 2 — schema verified)
+> Last updated: 2026-04-25 (session 4 — Phase 2a backend + frontend built; blocked on Docker env vars)
 > Update this file at the end of every session via `/end-session` after verifying changes.
 
 ---
@@ -22,8 +22,9 @@ security boundary.
 | Phase | Status    | Description |
 |-------|-----------|-------------|
 | 1 — Foundation        | ✅ Done   | Docker Compose, NestJS + Next.js scaffolds, pre-commit hooks |
-| 1b — DB Schema        | 🔜 Next   | `001_init.sql`: all enums, tables, seed data |
-| 2 — Portfolio view    | Pending   | Portfolio overview, XIRR, allocation vs target, live prices |
+| 1b — DB Schema        | ✅ Done   | `001_init.sql` + `002_investment_v2.sql`: all enums, tables, seed data |
+| 2a — Portfolio view   | 🔄 In Progress | Portfolio overview, allocation vs target, live prices — blocked on Docker env vars |
+| 2b — XIRR             | Pending   | XIRR per portfolio, asset class, lot |
 | 3 — Statement ingestion | Pending | Upload PDF/CSV → Claude AI parse → HITL review → commit |
 | 4 — Expense reporting | Pending   | Monthly + YTD views, budget vs actual, per-person attribution |
 | 5 — Investment reporting | Pending | Monthly invested by asset class, deficit/surplus tracker |
@@ -96,10 +97,12 @@ without re-importing.
 | `transaction_status`           | `pending`, `confirmed`, `edited`, `excluded`                        |
 | `ledger_statement_type`        | `savings_account`, `credit_card`                                    |
 | `income_type`                  | `salary`, `bonus`, `savings_interest`                               |
-| `price_source`                 | `yahoo_finance`, `amfi`, `coinmarketcap`, `metals_api`, `manual`    |
+| `price_source`                 | `yahoo_finance`, `amfi`, `coinmarketcap`, `gold_api`, `manual`      |
 | `investment_transaction_type`  | `buy`, `sell`, `dividend`                                           |
 | `investment_transaction_source`| `manual`, `seeded`, `imported`                                      |
 | `expense_transfer_type`        | `investment_platform`, `household_member`, `own_account`            |
+
+Note: `metals_api` was replaced by `gold_api` in migration `004_replace_metals_api_with_gold_api` (ADR-013).
 
 `income_type` is designed to grow via `ALTER TYPE ... ADD VALUE`.
 
@@ -225,7 +228,14 @@ asset (1) ──→ holding (1, household-wide derived state)
 
 ## 6. API Endpoints
 
-> Not yet defined — will be populated as NestJS controllers are built in Phase 2+.
+### Portfolio module (`/portfolio`)
+
+| Method | Path | Query | Description |
+|--------|------|-------|-------------|
+| GET | `/portfolio/summary` | `personId` | Total value, byAssetClass (% + delta vs target), byPlatform, rebalancing suggestions |
+| GET | `/portfolio/assets` | `personId` | List of assets held by person (id, name, assetClass, platform) |
+| GET | `/portfolio/assets/:assetId` | `personId` | Asset detail: metrics + lot table |
+| POST | `/portfolio/holdings/refresh` | — | Fetches live prices for all non-manual assets, writes to `holding.current_price` |
 
 ---
 
@@ -256,8 +266,9 @@ fetching live prices — no price snapshot table in the schema.
 | ADR-005 | Money as NUMERIC(18,4), quantities as NUMERIC(18,8) — never FLOAT               |
 | ADR-006 | Docker Compose as the sole development environment                               |
 | ADR-007 | Portfolio values computed at runtime via live price fetching — no snapshot table |
-| ADR-008 | Price API choices (Finnhub, mfapi.in, CoinGecko, Metals-API, Frankfurter)       |
+| ADR-008 | Price API choices (Finnhub, mfapi.in, CoinGecko, Metals-API, Frankfurter) — partially superseded by ADR-013 |
 | ADR-009 | In-memory price cache (Map, TTL 5 min, no Redis in Phase 2a)                    |
 | ADR-010 | Immutable ledger pattern: investment_transaction + holding replaces investment   |
 | ADR-011 | Internal transfer detection via transfer_type on expense                        |
 | ADR-012 | Portfolio inception date seeding strategy (April 1, 2026)                       |
+| ADR-013 | Replace Metals-API with GoldAPI for physical gold pricing                       |

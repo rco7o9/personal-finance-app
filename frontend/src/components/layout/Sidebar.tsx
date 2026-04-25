@@ -8,13 +8,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import {
-  LayoutDashboard,
-  TrendingUp,
-  Receipt,
-  FileText,
-  PieChart,
-} from "lucide-react";
+import { LayoutDashboard, TrendingUp, Receipt, FileText, PieChart } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -35,8 +29,7 @@ export function Sidebar() {
     return `${base}?personId=${personId}`;
   }
 
-  const isActive = (href: string) =>
-    pathname === href || pathname.startsWith(`${href}/`);
+  const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   return (
     <aside className="bg-sidebar flex h-full w-56 flex-col border-r px-3 py-4">

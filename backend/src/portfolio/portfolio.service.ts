@@ -199,6 +199,40 @@ export class PortfolioService {
     };
   }
 
+  async refreshHoldingPrices(): Promise<{ updated: number; skipped: number }> {
+    type AssetRow = { id: number; ticker_symbol: string | null; price_source: string | null };
+    const assets = await this.pool.query<AssetRow>(
+      `SELECT id, ticker_symbol, price_source::text FROM asset
+       WHERE price_source IS NOT NULL AND price_source != 'manual'`,
+    );
+
+    let updated = 0;
+    let skipped = 0;
+
+    await Promise.all(
+      assets.rows.map(async (a) => {
+        const price = await this.assetPriceService.getPriceInr({
+          id: a.id,
+          ticker_symbol: a.ticker_symbol,
+          price_source: a.price_source as AssetPriceRow["price_source"],
+        });
+
+        if (!price) {
+          skipped++;
+          return;
+        }
+
+        await this.pool.query(`UPDATE holding SET current_price = $1 WHERE asset_id = $2`, [
+          price.toFixed(4),
+          a.id,
+        ]);
+        updated++;
+      }),
+    );
+
+    return { updated, skipped };
+  }
+
   // ── private helpers ──────────────────────────────────────────────────────
 
   private async queryPositions(personId: number): Promise<PositionRow[]> {

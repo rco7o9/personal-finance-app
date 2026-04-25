@@ -184,27 +184,37 @@ describe("AssetPriceService", () => {
     });
   });
 
-  describe("metals_api (Metals-API)", () => {
+  describe("gold_api (GoldAPI)", () => {
     beforeEach(() => {
-      process.env.METALS_API_KEY = "test-metals-key";
+      process.env.GOLD_API_KEY = "test-gold-key";
     });
 
-    it("converts XAU/USD rate to INR per gram", async () => {
-      // rates.XAU = troy ounces per USD → 0.000320 means 1 USD = 0.000320 oz
-      // → 1 oz = 1/0.000320 = 3125 USD
-      // → per gram = 3125 / 31.1035 = 100.47... USD
-      // → in INR = 100.47 × 84.5 ≈ 8489.65
+    it("returns price_gram_24k directly as INR Decimal", async () => {
       fetchSpy.mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({ rates: { XAU: 0.00032 } }),
+        json: () => Promise.resolve({ price_gram_24k: 14312.9497 }),
       } as unknown as Response);
 
       const price = await service.getPriceInr(
-        asset({ price_source: "metals_api", ticker_symbol: "XAU" }),
+        asset({ price_source: "gold_api", ticker_symbol: "XAU" }),
       );
 
-      // (1 / 0.00032) * 84.5 / 31.1035 ≈ 8489.80
-      expect(price?.toNumber()).toBeCloseTo(8489.8, 0);
+      expect(price?.toNumber()).toBe(14312.9497);
+      expect(fetchSpy).toHaveBeenCalledWith("https://www.goldapi.io/api/XAU/INR", {
+        headers: { "x-access-token": "test-gold-key", "Content-Type": "application/json" },
+      });
+    });
+
+    it("returns null when price_gram_24k is missing", async () => {
+      fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({}),
+      } as unknown as Response);
+
+      const price = await service.getPriceInr(
+        asset({ price_source: "gold_api", ticker_symbol: "XAU" }),
+      );
+      expect(price).toBeNull();
     });
   });
 

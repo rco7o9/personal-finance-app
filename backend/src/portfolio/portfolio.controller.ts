@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, ParseIntPipe } from "@nestjs/common";
+import { Controller, Get, Param, Post, Query, ParseIntPipe } from "@nestjs/common";
 import { PortfolioService } from "./portfolio.service";
 
 @Controller("portfolio")
@@ -21,5 +21,10 @@ export class PortfolioController {
     @Query("personId", ParseIntPipe) personId: number,
   ) {
     return this.portfolioService.getAssetDetail(assetId, personId);
+  }
+
+  @Post("holdings/refresh")
+  refreshHoldingPrices() {
+    return this.portfolioService.refreshHoldingPrices();
   }
 }
