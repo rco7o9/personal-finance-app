@@ -21,7 +21,8 @@
     "migrate:up": "node-pg-migrate up --migrations-dir migrations --database-url-var DATABASE_URL",
     "migrate:down": "node-pg-migrate down --migrations-dir migrations --database-url-var DATABASE_URL",
     "migrate:create": "node-pg-migrate create --migrations-dir migrations",
-    "codegen": "pgtyped -c pgtyped.config.json"
+    "codegen": "pgtyped -c pgtyped.config.json",
+    "seed:amount-inr": "ts-node --project tsconfig.scripts.json scripts/seed-amount-inr.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
