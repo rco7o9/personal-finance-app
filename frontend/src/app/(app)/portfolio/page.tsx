@@ -2,26 +2,10 @@ import { apiGet } from "@/lib/api";
 import { formatCurrency, formatCurrencyShort, formatDelta, formatPercent } from "@/lib/formatters";
 import { PortfolioSummary } from "@/types";
 import { Badge } from "@/components/ui/badge";
+import { RefreshPrices } from "@/components/portfolio/RefreshPrices";
 
-export default async function PortfolioPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ personId?: string }>;
-}) {
-  const { personId } = await searchParams;
-
-  if (!personId) {
-    return (
-      <div>
-        <h2 className="text-2xl font-semibold tracking-tight">Portfolio</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          Select a person to view their portfolio.
-        </p>
-      </div>
-    );
-  }
-
-  const summary = await apiGet<PortfolioSummary>(`/portfolio/summary?personId=${personId}`);
+export default async function PortfolioPage() {
+  const summary = await apiGet<PortfolioSummary>("/portfolio/summary");
 
   return (
     <div className="space-y-8">
@@ -38,6 +22,9 @@ export default async function PortfolioPage({
           <div className="mb-1">
             <p className="text-muted-foreground text-xs tracking-wide uppercase">XIRR</p>
             <p className="text-muted-foreground mt-1 text-2xl font-semibold">—</p>
+          </div>
+          <div className="mb-1 ml-auto">
+            <RefreshPrices />
           </div>
         </div>
       </div>

@@ -5,20 +5,14 @@ import { AssetSelector } from "@/components/portfolio/AssetSelector";
 
 export default async function AssetDetailPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ assetId: string }>;
-  searchParams: Promise<{ personId?: string }>;
 }) {
-  const [{ assetId }, { personId }] = await Promise.all([params, searchParams]);
-
-  if (!personId) {
-    return <p className="text-muted-foreground text-sm">Select a person to view asset details.</p>;
-  }
+  const { assetId } = await params;
 
   const [detail, assets] = await Promise.all([
-    apiGet<AssetDetail>(`/portfolio/assets/${assetId}?personId=${personId}`),
-    apiGet<PortfolioAsset[]>(`/portfolio/assets?personId=${personId}`),
+    apiGet<AssetDetail>(`/portfolio/assets/${assetId}`),
+    apiGet<PortfolioAsset[]>("/portfolio/assets"),
   ]);
 
   return (
@@ -26,7 +20,7 @@ export default async function AssetDetailPage({
       {/* Header + selector */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-2xl font-semibold tracking-tight">{detail.assetName}</h2>
-        <AssetSelector assets={assets} currentAssetId={Number(assetId)} personId={personId} />
+        <AssetSelector assets={assets} currentAssetId={Number(assetId)} />
       </div>
 
       {/* 4-up metrics */}

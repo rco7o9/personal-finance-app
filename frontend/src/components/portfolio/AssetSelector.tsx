@@ -13,15 +13,14 @@ import { PortfolioAsset } from "@/types";
 interface Props {
   assets: PortfolioAsset[];
   currentAssetId: number;
-  personId: string;
 }
 
-export function AssetSelector({ assets, currentAssetId, personId }: Props) {
+export function AssetSelector({ assets, currentAssetId }: Props) {
   const router = useRouter();
 
   function handleChange(assetId: string | null) {
     if (!assetId) return;
-    router.push(`/portfolio/assets/${assetId}?personId=${personId}`);
+    router.push(`/portfolio/assets/${assetId}`);
   }
 
   return (
