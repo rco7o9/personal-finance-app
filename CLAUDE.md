@@ -61,7 +61,8 @@ sh .husky/pre-commit            # runs automatically on git commit
 ```
 
 ## Memory
-- **Active phase note:** `.claude/notes/phase2-portfolio-view.md`
+- **Active phase note:** `.claude/notes/phase3-statement-ingestion.md`
+- **Previous phase (complete):** `.claude/notes/phase2-portfolio-view.md`
 - **ADRs:** `docs/decisions/`
 
 ## Commit Rules

@@ -1,6 +1,6 @@
 # System Documentation — Personal Finance Tracker
 
-> Last updated: 2026-04-25 (session 8 — Phase 2b verification: BSE .BO price fix, XIRR seed data finding)
+> Last updated: 2026-04-25 (session 9 — Native-currency display for US equity holdings; ADR-018)
 > Update this file at the end of every session via `/end-session` after verifying changes.
 
 ---
@@ -25,6 +25,7 @@ security boundary.
 | 1b — DB Schema        | ✅ Done   | `001_init.sql` + `002_investment_v2.sql`: all enums, tables, seed data |
 | 2a — Portfolio view   | ✅ Done   | Portfolio overview, allocation vs target, live prices (47/56 holdings; 9 illiquid/SGB have no free API) |
 | 2b — XIRR             | ✅ Done   | XIRR per portfolio, asset class, lot. All 56 holdings priced. XIRR code correct; values meaningless until real transaction dates entered (all seeded as 2026-04-01). |
+| 2c — Native currency  | ✅ Done   | US equity holdings show USD price/value alongside INR. Native avg cost and total invested from original USD transaction amounts. See ADR-018. |
 | 3 — Statement ingestion | Pending | Upload PDF/CSV → Claude AI parse → HITL review → commit |
 | 4 — Expense reporting | Pending   | Monthly + YTD views, budget vs actual, per-person attribution |
 | 5 — Investment reporting | Pending | Monthly invested by asset class, deficit/surplus tracker |
@@ -174,9 +175,13 @@ Note: `metals_api` was replaced by `gold_api` in migration `004_replace_metals_a
 - `id`, `asset_id` (UNIQUE), `quantity NUMERIC(18,8)`, `avg_cost NUMERIC(18,4)`,
   `total_invested NUMERIC(18,4)`, `current_price NUMERIC(18,4)`, `current_value NUMERIC(18,4)`,
   `updated_at`
+- Native-currency columns (nullable — only populated for USD assets): `native_currency VARCHAR(3)`,
+  `native_avg_cost NUMERIC(18,4)`, `native_total_invested NUMERIC(18,4)`,
+  `current_price_native NUMERIC(18,4)`, `current_value_native NUMERIC(18,4)`
 - Recomputed from `investment_transaction WHERE status = 'confirmed'` after every confirmation
-- `current_price` and `current_value` updated separately by price refresh
-- Not a ledger — safe to delete and recompute at any time. See ADR-010.
+- `current_price`, `current_value`, `current_price_native`, `current_value_native` updated by price refresh
+- `native_avg_cost` and `native_total_invested` populated by `seed-native-columns.ts` from `it.amount`
+- Not a ledger — safe to delete and recompute at any time. See ADR-010, ADR-018.
 
 ### 5.5 Baseline / target tables
 
@@ -281,3 +286,4 @@ calls on portfolio page load. See ADR-015.
 | ADR-015 | Portfolio is household-wide; prices from cached holding table with explicit refresh (supersedes ADR-007) |
 | ADR-016 | Fix price coverage gaps: ACME missing holding record, SGBs → gold_api, BSE stocks .NS → .BO |
 | ADR-017 | amount_inr column: all cost-basis in INR; historical USD/INR from Frankfurter per transaction date |
+| ADR-018 | Native-currency columns on holding: stored USD price/cost for US equities; why stored not computed |
