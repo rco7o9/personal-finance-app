@@ -206,22 +206,43 @@ export class PortfolioService {
        WHERE price_source IS NOT NULL AND price_source != 'manual'`,
     );
 
+    const yahooAssets: AssetPriceRow[] = [];
+    const otherAssets: AssetPriceRow[] = [];
+
+    for (const a of assets.rows) {
+      const row: AssetPriceRow = {
+        id: a.id,
+        ticker_symbol: a.ticker_symbol,
+        price_source: a.price_source as AssetPriceRow["price_source"],
+      };
+      if (a.price_source === "yahoo_finance") {
+        yahooAssets.push(row);
+      } else {
+        otherAssets.push(row);
+      }
+    }
+
+    // Batch all yahoo_finance tickers into one API call to avoid rate limiting
+    const yahooPrices = await this.assetPriceService.batchFetchYahooFinancePrices(yahooAssets);
+
+    // Fetch other sources in parallel (amfi, coinmarketcap, gold_api)
+    const otherPricesArr = await Promise.all(
+      otherAssets.map((a) => this.assetPriceService.getPriceInr(a)),
+    );
+    const otherPrices = new Map(otherAssets.map((a, i) => [a.id, otherPricesArr[i]]));
+
+    const allPrices = new Map([...yahooPrices, ...otherPrices]);
+
     let updated = 0;
     let skipped = 0;
 
     await Promise.all(
       assets.rows.map(async (a) => {
-        const price = await this.assetPriceService.getPriceInr({
-          id: a.id,
-          ticker_symbol: a.ticker_symbol,
-          price_source: a.price_source as AssetPriceRow["price_source"],
-        });
-
+        const price = allPrices.get(a.id);
         if (!price) {
           skipped++;
           return;
         }
-
         await this.pool.query(`UPDATE holding SET current_price = $1 WHERE asset_id = $2`, [
           price.toFixed(4),
           a.id,

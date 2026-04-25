@@ -69,7 +69,6 @@ describe("AssetPriceService", () => {
 
       const a = asset({ id: 10, price_source: "amfi", ticker_symbol: "118834" });
       await service.getPriceInr(a);
-      // Manually expire the cache entry
       service["cache"].get(10)!.fetchedAt = new Date(0);
       await service.getPriceInr(a);
 
@@ -83,8 +82,8 @@ describe("AssetPriceService", () => {
       } as unknown as Response);
 
       const a = asset({ id: 10, price_source: "amfi", ticker_symbol: "118834" });
-      await service.getPriceInr(a); // fails → null, not cached
-      const price = await service.getPriceInr(a); // retries → succeeds
+      await service.getPriceInr(a);
+      const price = await service.getPriceInr(a);
 
       expect(price?.toNumber()).toBe(170.83);
     });
@@ -111,10 +110,9 @@ describe("AssetPriceService", () => {
         json: () => Promise.resolve({ data: [] }),
       } as unknown as Response);
 
-      const price = await service.getPriceInr(
-        asset({ price_source: "amfi", ticker_symbol: "118834" }),
-      );
-      expect(price).toBeNull();
+      expect(
+        await service.getPriceInr(asset({ price_source: "amfi", ticker_symbol: "118834" })),
+      ).toBeNull();
     });
   });
 
@@ -136,28 +134,41 @@ describe("AssetPriceService", () => {
     });
   });
 
-  describe("yahoo_finance (Finnhub)", () => {
-    beforeEach(() => {
-      process.env.FINNHUB_API_KEY = "test-key";
-    });
-
-    it("returns INR price directly for .NS tickers", async () => {
+  describe("yahoo_finance — Indian stocks (Indian Stock Market API)", () => {
+    it("returns INR price for .NS tickers via Indian Stock API", async () => {
       fetchSpy.mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({ c: 811.75 }),
+        json: () => Promise.resolve({ data: { last_price: 784.85 } }),
       } as unknown as Response);
 
       const price = await service.getPriceInr(
         asset({ price_source: "yahoo_finance", ticker_symbol: "HDFCBANK.NS" }),
       );
 
-      expect(price?.toNumber()).toBe(811.75);
-      expect(fetchSpy).toHaveBeenCalledWith(
-        "https://finnhub.io/api/v1/quote?symbol=HDFCBANK.NS&token=test-key",
-      );
+      expect(price?.toNumber()).toBe(784.85);
+      expect(fetchSpy).toHaveBeenCalledWith("http://65.0.104.9/stock?symbol=HDFCBANK.NS&res=num");
     });
 
-    it("multiplies by USD/INR for non-.NS tickers", async () => {
+    it("returns null when last_price is missing", async () => {
+      fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ data: {} }),
+      } as unknown as Response);
+
+      expect(
+        await service.getPriceInr(
+          asset({ price_source: "yahoo_finance", ticker_symbol: "HDFCBANK.NS" }),
+        ),
+      ).toBeNull();
+    });
+  });
+
+  describe("yahoo_finance — US stocks (Finnhub)", () => {
+    beforeEach(() => {
+      process.env.FINNHUB_API_KEY = "test-key";
+    });
+
+    it("multiplies by USD/INR for US tickers", async () => {
       fetchSpy.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ c: 200.0 }),
@@ -167,20 +178,22 @@ describe("AssetPriceService", () => {
         asset({ price_source: "yahoo_finance", ticker_symbol: "MSFT" }),
       );
 
-      // 200 USD × 84.5 INR/USD = 16900
+      // 200 USD × 84.5 = 16900
       expect(price?.toNumber()).toBe(16900);
+      expect(fetchSpy).toHaveBeenCalledWith(
+        "https://finnhub.io/api/v1/quote?symbol=MSFT&token=test-key",
+      );
     });
 
-    it("returns null when Finnhub returns price 0", async () => {
+    it("returns null when Finnhub price is 0", async () => {
       fetchSpy.mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve({ c: 0 }),
       } as unknown as Response);
 
-      const price = await service.getPriceInr(
-        asset({ price_source: "yahoo_finance", ticker_symbol: "HDFCBANK.NS" }),
-      );
-      expect(price).toBeNull();
+      expect(
+        await service.getPriceInr(asset({ price_source: "yahoo_finance", ticker_symbol: "MSFT" })),
+      ).toBeNull();
     });
   });
 
@@ -211,33 +224,27 @@ describe("AssetPriceService", () => {
         json: () => Promise.resolve({}),
       } as unknown as Response);
 
-      const price = await service.getPriceInr(
-        asset({ price_source: "gold_api", ticker_symbol: "XAU" }),
-      );
-      expect(price).toBeNull();
+      expect(
+        await service.getPriceInr(asset({ price_source: "gold_api", ticker_symbol: "XAU" })),
+      ).toBeNull();
     });
   });
 
   describe("error handling", () => {
     it("returns null on HTTP error", async () => {
-      fetchSpy.mockResolvedValueOnce({
-        ok: false,
-        status: 429,
-      } as unknown as Response);
+      fetchSpy.mockResolvedValueOnce({ ok: false, status: 429 } as unknown as Response);
 
-      const price = await service.getPriceInr(
-        asset({ price_source: "amfi", ticker_symbol: "118834" }),
-      );
-      expect(price).toBeNull();
+      expect(
+        await service.getPriceInr(asset({ price_source: "amfi", ticker_symbol: "118834" })),
+      ).toBeNull();
     });
 
     it("returns null on network error", async () => {
       fetchSpy.mockRejectedValueOnce(new Error("ECONNREFUSED"));
 
-      const price = await service.getPriceInr(
-        asset({ price_source: "amfi", ticker_symbol: "118834" }),
-      );
-      expect(price).toBeNull();
+      expect(
+        await service.getPriceInr(asset({ price_source: "amfi", ticker_symbol: "118834" })),
+      ).toBeNull();
     });
   });
 });
