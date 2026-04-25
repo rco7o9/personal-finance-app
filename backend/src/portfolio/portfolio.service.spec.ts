@@ -1,5 +1,6 @@
 import { PortfolioService } from "./portfolio.service";
 import { AssetPriceService } from "../asset-price/asset-price.service";
+import Decimal from "decimal.js";
 
 // Minimal mock pool — feed query results in call order
 const makeMockPool = (...results: { rows: unknown[] }[]) => {
@@ -12,9 +13,10 @@ const mockAssetPriceService = () =>
   ({
     getPriceInr: jest.fn().mockResolvedValue(null),
     batchFetchYahooFinancePrices: jest.fn().mockResolvedValue(new Map()),
+    batchFetchFinnhubWithNative: jest.fn().mockResolvedValue(new Map()),
   }) as unknown as AssetPriceService;
 
-// Shared position row factory
+// Shared position row factory — auto-computes current_value from quantity × current_price
 const pos = (
   overrides: Partial<{
     asset_id: number;
@@ -27,20 +29,30 @@ const pos = (
     quantity: string;
     total_invested: string;
     current_price: string | null;
+    current_value: string | null;
   }>,
-) => ({
-  asset_id: 1,
-  asset_name: "Test Asset",
-  ticker_symbol: "TEST.NS",
-  price_source: "yahoo_finance",
-  category_id: 2,
-  category_name: "Indian Equity",
-  platform: "Zerodha",
-  quantity: "100",
-  total_invested: "1000",
-  current_price: null,
-  ...overrides,
-});
+) => {
+  const merged = {
+    asset_id: 1,
+    asset_name: "Test Asset",
+    ticker_symbol: "TEST.NS",
+    price_source: "yahoo_finance",
+    category_id: 2,
+    category_name: "Indian Equity",
+    platform: "Zerodha",
+    quantity: "100",
+    total_invested: "1000",
+    current_price: null as string | null,
+    current_value: null as string | null,
+    ...overrides,
+  };
+  if (merged.current_value === null && merged.current_price !== null) {
+    merged.current_value = (parseFloat(merged.quantity) * parseFloat(merged.current_price)).toFixed(
+      4,
+    );
+  }
+  return merged;
+};
 
 // getSummary uses Promise.all([queryPositions, queryTargets, queryXirrFlows]) — 3 pool results
 const noFlows = { rows: [] }; // empty XIRR flows → overallXirr = null
@@ -381,6 +393,7 @@ describe("PortfolioService", () => {
               avg_cost: "810.0000",
               total_invested: "73710.0000",
               current_price: "820",
+              current_value: "74620.0000",
             },
           ],
         },
@@ -421,6 +434,7 @@ describe("PortfolioService", () => {
               avg_cost: "100.0000",
               total_invested: "100.0000",
               current_price: null,
+              current_value: null,
             },
           ],
         },
@@ -447,6 +461,12 @@ describe("PortfolioService", () => {
               avg_cost: "810.0000",
               total_invested: "73710.0000",
               current_price: "820",
+              current_value: "74620.0000",
+              native_currency: null,
+              native_avg_cost: null,
+              native_total_invested: null,
+              current_price_native: null,
+              current_value_native: null,
             },
           ],
         },
@@ -459,6 +479,7 @@ describe("PortfolioService", () => {
               quantity: "91.00000000",
               price: "810.0000",
               amount_inr: "73710.0000",
+              amount: "73710.0000",
             },
           ],
         },
@@ -469,6 +490,127 @@ describe("PortfolioService", () => {
 
       expect(result!.lots[0].cost).toBe("73710.0000");
       expect(result!.lots[0].type).toBe("buy");
+    });
+
+    it("returns native fields for a USD holding", async () => {
+      const pool = makeMockPool(
+        {
+          rows: [
+            {
+              asset_id: 20,
+              asset_name: "Apple Inc",
+              ticker_symbol: "AAPL",
+              price_source: "yahoo_finance",
+              quantity: "10",
+              avg_cost: "16000.0000",
+              total_invested: "160000.0000",
+              current_price: "17000",
+              current_value: "170000.0000",
+              native_currency: "USD",
+              native_avg_cost: "190.0000",
+              native_total_invested: "1900.0000",
+              current_price_native: "195.0000",
+              current_value_native: "1950.0000",
+            },
+          ],
+        },
+        {
+          rows: [
+            {
+              id: 2,
+              date: new Date("2026-01-01"),
+              type: "buy",
+              quantity: "10.00000000",
+              price: "190.0000",
+              amount_inr: "160000.0000",
+              amount: "1900.0000",
+            },
+          ],
+        },
+      );
+
+      const svc = new PortfolioService(pool as never, mockAssetPriceService());
+      const result = await svc.getAssetDetail(20);
+
+      expect(result!.nativeCurrency).toBe("USD");
+      expect(result!.nativeAvgCost).toBe("190.0000");
+      expect(result!.nativeTotalInvested).toBe("1900.0000");
+      expect(result!.currentPriceNative).toBe("195.0000");
+      expect(result!.currentValueNative).toBe("1950.0000");
+      expect(result!.lots[0].costNative).toBe("1900.0000");
+      expect(result!.lots[0].currentValueNative).not.toBeNull();
+    });
+
+    it("returns null native fields for an INR holding", async () => {
+      const pool = makeMockPool(
+        {
+          rows: [
+            {
+              asset_id: 10,
+              asset_name: "HDFC Bank",
+              ticker_symbol: "HDFCBANK.NS",
+              price_source: "yahoo_finance",
+              quantity: "91",
+              avg_cost: "810.0000",
+              total_invested: "73710.0000",
+              current_price: "820",
+              current_value: "74620.0000",
+              native_currency: null,
+              native_avg_cost: null,
+              native_total_invested: null,
+              current_price_native: null,
+              current_value_native: null,
+            },
+          ],
+        },
+        {
+          rows: [
+            {
+              id: 1,
+              date: new Date("2026-04-01"),
+              type: "buy",
+              quantity: "91.00000000",
+              price: "810.0000",
+              amount_inr: "73710.0000",
+              amount: "73710.0000",
+            },
+          ],
+        },
+      );
+
+      const svc = new PortfolioService(pool as never, mockAssetPriceService());
+      const result = await svc.getAssetDetail(10);
+
+      expect(result!.nativeCurrency).toBeNull();
+      expect(result!.nativeAvgCost).toBeNull();
+      expect(result!.lots[0].costNative).toBeNull();
+      expect(result!.lots[0].currentValueNative).toBeNull();
+    });
+  });
+
+  describe("refreshHoldingPrices", () => {
+    it("writes current_price_native and current_value_native for Finnhub (US) assets", async () => {
+      const priceUsd = new Decimal("195");
+      const priceInr = new Decimal("17940");
+
+      const assetQueryResult = {
+        rows: [{ id: 7, ticker_symbol: "AAPL", price_source: "yahoo_finance" }],
+      };
+      const pool = makeMockPool(assetQueryResult, { rows: [] }); // second query = UPDATE result
+
+      const priceSvc = mockAssetPriceService();
+      jest
+        .spyOn(priceSvc, "batchFetchFinnhubWithNative")
+        .mockResolvedValue(new Map([[7, { priceUsd, priceInr }]]));
+
+      const svc = new PortfolioService(pool as never, priceSvc);
+      await svc.refreshHoldingPrices();
+
+      const calls = pool.query.mock.calls as [string, unknown[]][];
+      const updateCall = calls[1];
+      expect(updateCall[0]).toContain("current_price_native");
+      expect(updateCall[0]).toContain("current_value_native");
+      expect(updateCall[1]).toContain("195.0000"); // priceUsd
     });
   });
 });

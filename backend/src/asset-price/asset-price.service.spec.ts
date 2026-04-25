@@ -230,6 +230,39 @@ describe("AssetPriceService", () => {
     });
   });
 
+  describe("batchFetchFinnhubWithNative", () => {
+    beforeEach(() => {
+      process.env.FINNHUB_API_KEY = "test-key";
+    });
+
+    it("returns priceUsd and priceInr for a successful fetch", async () => {
+      fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ c: 150.0 }),
+      } as unknown as Response);
+
+      const a = asset({ id: 5, price_source: "yahoo_finance", ticker_symbol: "AAPL" });
+      const result = await service.batchFetchFinnhubWithNative([a]);
+
+      expect(result.get(5)?.priceUsd.toNumber()).toBe(150);
+      expect(result.get(5)?.priceInr.toNumber()).toBe(150 * 84.5);
+    });
+
+    it("returns null for an asset on Finnhub HTTP error", async () => {
+      fetchSpy.mockResolvedValueOnce({ ok: false, status: 429 } as unknown as Response);
+
+      const a = asset({ id: 6, price_source: "yahoo_finance", ticker_symbol: "MSFT" });
+      const result = await service.batchFetchFinnhubWithNative([a]);
+
+      expect(result.get(6)).toBeNull();
+    });
+
+    it("returns empty map for empty input", async () => {
+      const result = await service.batchFetchFinnhubWithNative([]);
+      expect(result.size).toBe(0);
+    });
+  });
+
   describe("error handling", () => {
     it("returns null on HTTP error", async () => {
       fetchSpy.mockResolvedValueOnce({ ok: false, status: 429 } as unknown as Response);

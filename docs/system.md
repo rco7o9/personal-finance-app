@@ -1,6 +1,6 @@
 # System Documentation — Personal Finance Tracker
 
-> Last updated: 2026-04-25 (session 6 — Phase 2b pre-work: portfolio redesigned as household-wide, cached prices, explicit refresh CTA)
+> Last updated: 2026-04-25 (session 8 — Phase 2b verification: BSE .BO price fix, XIRR seed data finding)
 > Update this file at the end of every session via `/end-session` after verifying changes.
 
 ---
@@ -24,7 +24,7 @@ security boundary.
 | 1 — Foundation        | ✅ Done   | Docker Compose, NestJS + Next.js scaffolds, pre-commit hooks |
 | 1b — DB Schema        | ✅ Done   | `001_init.sql` + `002_investment_v2.sql`: all enums, tables, seed data |
 | 2a — Portfolio view   | ✅ Done   | Portfolio overview, allocation vs target, live prices (47/56 holdings; 9 illiquid/SGB have no free API) |
-| 2b — XIRR             | Pending   | XIRR per portfolio, asset class, lot |
+| 2b — XIRR             | ✅ Done   | XIRR per portfolio, asset class, lot. All 56 holdings priced. XIRR code correct; values meaningless until real transaction dates entered (all seeded as 2026-04-01). |
 | 3 — Statement ingestion | Pending | Upload PDF/CSV → Claude AI parse → HITL review → commit |
 | 4 — Expense reporting | Pending   | Monthly + YTD views, budget vs actual, per-person attribution |
 | 5 — Investment reporting | Pending | Monthly invested by asset class, deficit/surplus tracker |
@@ -239,7 +239,7 @@ fetches in the read path. See ADR-015.
 | GET | `/portfolio/summary` | — | Household total value, byAssetClass (% + delta vs target), byPlatform, rebalancing suggestions. Reads `holding.current_price` from DB — no live API calls. |
 | GET | `/portfolio/assets` | — | All assets held across the household (id, name, assetClass, platform) |
 | GET | `/portfolio/assets/:assetId` | — | Asset detail: metrics + lot table (all household transactions) |
-| POST | `/portfolio/holdings/refresh` | — | Fetches live prices for all non-manual assets, writes to `holding.current_price`. Adds 500ms sleep between Indian stock API chunks to avoid rate limits. |
+| POST | `/portfolio/holdings/refresh` | — | Fetches live prices for all non-manual assets, writes to `holding.current_price`. 1000ms sleep between every sequential external API call. Returns `{ updated, skipped }`. |
 
 ---
 
@@ -280,3 +280,4 @@ calls on portfolio page load. See ADR-015.
 | ADR-014 | Indian Stock Market API for NSE/BSE equity pricing (replaces Finnhub for .NS/.BO tickers) |
 | ADR-015 | Portfolio is household-wide; prices from cached holding table with explicit refresh (supersedes ADR-007) |
 | ADR-016 | Fix price coverage gaps: ACME missing holding record, SGBs → gold_api, BSE stocks .NS → .BO |
+| ADR-017 | amount_inr column: all cost-basis in INR; historical USD/INR from Frankfurter per transaction date |

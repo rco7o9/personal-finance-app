@@ -58,7 +58,9 @@ export type LotEntry = {
   units: string;
   buyPrice: string;
   cost: string;
+  costNative: string | null;
   currentValue: string | null;
+  currentValueNative: string | null;
   xirr: string | null;
 };
 
@@ -70,5 +72,10 @@ export type AssetDetail = {
   unrealisedGain: string | null;
   absoluteReturnPct: string | null;
   xirr: string | null;
+  nativeCurrency: string | null;
+  nativeAvgCost: string | null;
+  nativeTotalInvested: string | null;
+  currentPriceNative: string | null;
+  currentValueNative: string | null;
   lots: LotEntry[];
 };

@@ -1,7 +1,11 @@
 import { Injectable, Inject } from "@nestjs/common";
 import { Pool } from "pg";
 import Decimal from "decimal.js";
-import { AssetPriceService, AssetPriceRow } from "../asset-price/asset-price.service";
+import {
+  AssetPriceService,
+  AssetPriceRow,
+  FinnhubNativeResult,
+} from "../asset-price/asset-price.service";
 import { xirr, CashFlow } from "./xirr";
 
 type PositionRow = {
@@ -15,6 +19,7 @@ type PositionRow = {
   quantity: string;
   total_invested: string;
   current_price: string | null;
+  current_value: string | null;
 };
 
 type AllocationTargetRow = {
@@ -32,6 +37,12 @@ type HoldingRow = {
   avg_cost: string;
   total_invested: string;
   current_price: string | null;
+  current_value: string | null;
+  native_currency: string | null;
+  native_avg_cost: string | null;
+  native_total_invested: string | null;
+  current_price_native: string | null;
+  current_value_native: string | null;
 };
 
 type LotRow = {
@@ -41,6 +52,7 @@ type LotRow = {
   quantity: string;
   price: string;
   amount_inr: string;
+  amount: string;
 };
 
 type AssetListRow = {
@@ -78,18 +90,13 @@ export class PortfolioService {
 
     const targetMap = new Map(targets.map((t) => [t.category_id, t]));
 
-    const positionsWithValue = positions.map((p) => ({
-      ...p,
-      currentValue: this.computeCurrentValue(p),
-    }));
-
-    const totalValue = positionsWithValue.reduce(
-      (sum, p) => (p.currentValue ? sum.add(p.currentValue) : sum),
+    const totalValue = positions.reduce(
+      (sum, p) => (p.current_value ? sum.add(new Decimal(p.current_value)) : sum),
       new Decimal(0),
     );
 
-    const byAssetClass = this.groupByAssetClass(positionsWithValue, totalValue, targetMap);
-    const byPlatform = this.groupByPlatform(positionsWithValue);
+    const byAssetClass = this.groupByAssetClass(positions, totalValue, targetMap);
+    const byPlatform = this.groupByPlatform(positions);
 
     const today = new Date();
     const overallXirr = this.computePortfolioXirr(flows, totalValue, today);
@@ -158,7 +165,13 @@ export class PortfolioService {
            h.quantity::text,
            h.avg_cost::text,
            h.total_invested::text,
-           h.current_price::text
+           h.current_price::text,
+           h.current_value::text,
+           h.native_currency,
+           h.native_avg_cost::text,
+           h.native_total_invested::text,
+           h.current_price_native::text,
+           h.current_value_native::text
          FROM holding h
          JOIN asset a ON a.id = h.asset_id
          WHERE h.asset_id = $1`,
@@ -166,7 +179,7 @@ export class PortfolioService {
       ),
       this.pool.query<LotRow>(
         `SELECT id, transacted_at AS date, type,
-                quantity::text, price::text, amount_inr::text
+                quantity::text, price::text, amount_inr::text, amount::text
          FROM investment_transaction
          WHERE asset_id = $1 AND status = 'confirmed'
          ORDER BY transacted_at DESC`,
@@ -178,9 +191,9 @@ export class PortfolioService {
     if (!h) return null;
 
     const currentPrice = h.current_price ? new Decimal(h.current_price) : null;
-    const qty = new Decimal(h.quantity);
+    const currentPriceNative = h.current_price_native ? new Decimal(h.current_price_native) : null;
     const totalInvested = new Decimal(h.total_invested);
-    const currentValue = currentPrice ? qty.mul(currentPrice) : null;
+    const currentValue = h.current_value ? new Decimal(h.current_value) : null;
     const unrealisedGain = currentValue ? currentValue.sub(totalInvested) : null;
     const absoluteReturnPct =
       unrealisedGain && totalInvested.gt(0) ? unrealisedGain.div(totalInvested).mul(100) : null;
@@ -189,6 +202,9 @@ export class PortfolioService {
 
     const lots = lotsRes.rows.map((lot) => {
       const lotValue = currentPrice ? new Decimal(lot.quantity).mul(currentPrice) : null;
+      const lotValueNative = currentPriceNative
+        ? new Decimal(lot.quantity).mul(currentPriceNative)
+        : null;
       let lotXirr: string | null = null;
       if (lot.type === "buy" && lotValue && currentPrice) {
         lotXirr = this.computeXirrFromFlows(
@@ -204,7 +220,9 @@ export class PortfolioService {
         units: lot.quantity,
         buyPrice: lot.price,
         cost: lot.amount_inr,
+        costNative: h.native_currency ? lot.amount : null,
         currentValue: lotValue ? lotValue.toFixed(2) : null,
+        currentValueNative: lotValueNative ? lotValueNative.toFixed(2) : null,
         xirr: lotXirr,
       };
     });
@@ -226,6 +244,11 @@ export class PortfolioService {
       unrealisedGain: unrealisedGain ? unrealisedGain.toFixed(2) : null,
       absoluteReturnPct: absoluteReturnPct ? absoluteReturnPct.toFixed(2) : null,
       xirr: assetXirr,
+      nativeCurrency: h.native_currency ?? null,
+      nativeAvgCost: h.native_avg_cost ?? null,
+      nativeTotalInvested: h.native_total_invested ?? null,
+      currentPriceNative: h.current_price_native ?? null,
+      currentValueNative: h.current_value_native ?? null,
       lots,
     };
   }
@@ -237,7 +260,8 @@ export class PortfolioService {
        WHERE price_source IS NOT NULL AND price_source != 'manual'`,
     );
 
-    const yahooAssets: AssetPriceRow[] = [];
+    const indianYahooAssets: AssetPriceRow[] = [];
+    const usYahooAssets: AssetPriceRow[] = [];
     const otherAssets: AssetPriceRow[] = [];
 
     for (const a of assets.rows) {
@@ -247,13 +271,21 @@ export class PortfolioService {
         price_source: a.price_source as AssetPriceRow["price_source"],
       };
       if (a.price_source === "yahoo_finance") {
-        yahooAssets.push(row);
+        const isIndian = a.ticker_symbol?.endsWith(".NS") || a.ticker_symbol?.endsWith(".BO");
+        if (isIndian) {
+          indianYahooAssets.push(row);
+        } else {
+          usYahooAssets.push(row);
+        }
       } else {
         otherAssets.push(row);
       }
     }
 
-    const yahooPrices = await this.assetPriceService.batchFetchYahooFinancePrices(yahooAssets);
+    const [indianPrices, usPrices] = await Promise.all([
+      this.assetPriceService.batchFetchYahooFinancePrices(indianYahooAssets),
+      this.assetPriceService.batchFetchFinnhubWithNative(usYahooAssets),
+    ]);
 
     // Non-Yahoo sources (amfi, coinmarketcap, gold_api) fetched sequentially to avoid rate limits
     const otherPrices = new Map<number, Decimal | null>();
@@ -263,22 +295,42 @@ export class PortfolioService {
       if (i < otherAssets.length - 1) await sleep(REFRESH_SLEEP_MS);
     }
 
-    const allPrices = new Map([...yahooPrices, ...otherPrices]);
-
     let updated = 0;
     let skipped = 0;
 
+    // Write INR-only prices (Indian stocks + other sources)
+    const inrOnlyPrices = new Map<number, Decimal | null>([...indianPrices, ...otherPrices]);
     await Promise.all(
-      assets.rows.map(async (a) => {
-        const price = allPrices.get(a.id);
+      [...inrOnlyPrices.entries()].map(async ([id, price]) => {
         if (!price) {
           skipped++;
           return;
         }
-        await this.pool.query(`UPDATE holding SET current_price = $1 WHERE asset_id = $2`, [
-          price.toFixed(4),
-          a.id,
-        ]);
+        await this.pool.query(
+          `UPDATE holding SET current_price = $1, current_value = $1::numeric * quantity WHERE asset_id = $2`,
+          [price.toFixed(4), id],
+        );
+        updated++;
+      }),
+    );
+
+    // Write native + INR prices for US (Finnhub) assets
+    await Promise.all(
+      [...usPrices.entries()].map(async ([id, result]: [number, FinnhubNativeResult | null]) => {
+        if (!result) {
+          skipped++;
+          return;
+        }
+        await this.pool.query(
+          `UPDATE holding SET
+             current_price        = $1,
+             current_value        = $1::numeric * quantity,
+             current_price_native = $2,
+             current_value_native = $2::numeric * quantity,
+             native_currency      = 'USD'
+           WHERE asset_id = $3`,
+          [result.priceInr.toFixed(4), result.priceUsd.toFixed(4), id],
+        );
         updated++;
       }),
     );
@@ -291,25 +343,25 @@ export class PortfolioService {
   private async queryPositions(): Promise<PositionRow[]> {
     const result = await this.pool.query<PositionRow>(
       `SELECT
-         a.id                                                                              AS asset_id,
-         a.name                                                                            AS asset_name,
+         h.asset_id,
+         a.name                   AS asset_name,
          a.ticker_symbol,
          a.price_source::text,
-         ic.id                                                                             AS category_id,
-         ic.name                                                                           AS category_name,
-         fi.name                                                                           AS platform,
-         SUM(CASE WHEN it.type = 'buy' THEN it.quantity    ELSE -it.quantity    END)::text AS quantity,
-         SUM(CASE WHEN it.type = 'buy' THEN it.amount_inr  ELSE -it.amount_inr  END)::text AS total_invested,
-         h.current_price::text
-       FROM investment_transaction it
-       JOIN asset a ON a.id = it.asset_id
+         ic.id                    AS category_id,
+         ic.name                  AS category_name,
+         (SELECT fi.name
+          FROM investment_transaction it
+          JOIN financial_institution fi ON fi.id = it.financial_institution_id
+          WHERE it.asset_id = h.asset_id AND it.status = 'confirmed'
+          LIMIT 1)                AS platform,
+         h.quantity::text,
+         h.total_invested::text,
+         h.current_price::text,
+         h.current_value::text
+       FROM holding h
+       JOIN asset a ON a.id = h.asset_id
        JOIN investment_category ic ON ic.id = a.investment_category_id
-       JOIN financial_institution fi ON fi.id = it.financial_institution_id
-       LEFT JOIN holding h ON h.asset_id = a.id
-       WHERE it.status = 'confirmed'
-       GROUP BY a.id, a.name, a.ticker_symbol, a.price_source,
-                ic.id, ic.name, fi.name, h.current_price
-       HAVING SUM(CASE WHEN it.type = 'buy' THEN it.quantity ELSE -it.quantity END) > 0
+       WHERE h.quantity > 0
        ORDER BY ic.name, a.name`,
     );
     return result.rows;
@@ -326,28 +378,21 @@ export class PortfolioService {
     return result.rows;
   }
 
-  private computeCurrentValue(p: PositionRow): Decimal | null {
-    if (!p.current_price) return null;
-    return new Decimal(p.quantity).mul(new Decimal(p.current_price));
-  }
-
   private groupByAssetClass(
-    positions: (PositionRow & { currentValue: Decimal | null })[],
+    positions: PositionRow[],
     totalValue: Decimal,
     targetMap: Map<number, AllocationTargetRow>,
   ) {
     const map = new Map<number, { categoryName: string; value: Decimal }>();
 
     for (const p of positions) {
-      if (!p.currentValue) continue;
+      if (!p.current_value) continue;
+      const val = new Decimal(p.current_value);
       const existing = map.get(p.category_id);
       if (existing) {
-        existing.value = existing.value.add(p.currentValue);
+        existing.value = existing.value.add(val);
       } else {
-        map.set(p.category_id, {
-          categoryName: p.category_name,
-          value: p.currentValue,
-        });
+        map.set(p.category_id, { categoryName: p.category_name, value: val });
       }
     }
 
@@ -413,21 +458,18 @@ export class PortfolioService {
     return this.computeXirrFromFlows(cashFlows, classValue, today);
   }
 
-  private groupByPlatform(positions: (PositionRow & { currentValue: Decimal | null })[]) {
+  private groupByPlatform(positions: PositionRow[]) {
     const map = new Map<string, { platform: string; assetClass: string; value: Decimal }>();
 
     for (const p of positions) {
-      if (!p.currentValue) continue;
+      if (!p.current_value) continue;
+      const val = new Decimal(p.current_value);
       const key = `${p.platform}||${p.category_name}`;
       const existing = map.get(key);
       if (existing) {
-        existing.value = existing.value.add(p.currentValue);
+        existing.value = existing.value.add(val);
       } else {
-        map.set(key, {
-          platform: p.platform,
-          assetClass: p.category_name,
-          value: p.currentValue,
-        });
+        map.set(key, { platform: p.platform, assetClass: p.category_name, value: val });
       }
     }
 

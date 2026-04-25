@@ -43,3 +43,14 @@ export function formatDelta(delta: string): string {
   const n = parseFloat(delta);
   return `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 }
+
+// Dual-currency: "$12.34 / ₹1,045" — used for US equity values alongside INR
+export function formatNativeAndInr(nativeAmount: string, inrAmount: string): string {
+  const nativeNum = parseFloat(nativeAmount);
+  const nativeFormatted = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(nativeNum);
+  return `${nativeFormatted} / ${formatCurrency(inrAmount)}`;
+}

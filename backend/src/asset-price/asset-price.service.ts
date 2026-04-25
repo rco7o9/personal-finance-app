@@ -10,6 +10,8 @@ export type AssetPriceRow = {
   price_source: PriceSource;
 };
 
+export type FinnhubNativeResult = { priceInr: Decimal; priceUsd: Decimal };
+
 type CacheEntry = { priceInr: Decimal; fetchedAt: Date };
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -76,6 +78,23 @@ export class AssetPriceService {
     return new Map([...indianPrices, ...usPrices]);
   }
 
+  async batchFetchFinnhubWithNative(
+    assets: AssetPriceRow[],
+  ): Promise<Map<number, FinnhubNativeResult | null>> {
+    if (assets.length === 0) return new Map();
+    const results: [number, FinnhubNativeResult | null][] = [];
+    for (let i = 0; i < assets.length; i++) {
+      if (i > 0) await sleep(REFRESH_SLEEP_MS);
+      try {
+        const result = await this.fetchFinnhubWithNative(assets[i].ticker_symbol!);
+        results.push([assets[i].id, result]);
+      } catch {
+        results.push([assets[i].id, null]);
+      }
+    }
+    return new Map(results);
+  }
+
   private async batchFetchIndianStocks(
     assets: AssetPriceRow[],
   ): Promise<Map<number, Decimal | null>> {
@@ -102,8 +121,7 @@ export class AssetPriceService {
     assets: AssetPriceRow[],
     retries = 2,
   ): Promise<Map<number, Decimal | null>> {
-    // Strip exchange suffix — API accepts bare symbols (e.g. HDFCBANK, not HDFCBANK.NS)
-    const symbols = assets.map((a) => a.ticker_symbol!.replace(/\.(NS|BO)$/, "")).join(",");
+    const symbols = assets.map((a) => a.ticker_symbol!).join(",");
     const url = `${INDIAN_STOCK_API}/stock/list?symbols=${symbols}&res=num`;
 
     let stocks: { ticker?: string; last_price?: number }[];
@@ -172,8 +190,7 @@ export class AssetPriceService {
   private async fetchYahooFinance(ticker: string): Promise<Decimal | null> {
     const isIndian = ticker.endsWith(".NS") || ticker.endsWith(".BO");
     if (isIndian) {
-      const symbol = ticker.replace(/\.(NS|BO)$/, "");
-      const url = `${INDIAN_STOCK_API}/stock?symbol=${symbol}.NS&res=num`;
+      const url = `${INDIAN_STOCK_API}/stock?symbol=${ticker}&res=num`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Indian Stock API HTTP ${res.status}`);
       const data = (await res.json()) as { data?: { last_price?: number } };
@@ -194,6 +211,20 @@ export class AssetPriceService {
 
     const usdToInr = await this.currencyService.getUsdToInr();
     return new Decimal(data.c).mul(usdToInr);
+  }
+
+  private async fetchFinnhubWithNative(ticker: string): Promise<FinnhubNativeResult | null> {
+    const apiKey = process.env.FINNHUB_API_KEY;
+    const url = `https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${apiKey}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Finnhub HTTP ${res.status}`);
+
+    const data = (await res.json()) as { c: number };
+    if (!data.c || data.c === 0) return null;
+
+    const usdToInr = await this.currencyService.getUsdToInr();
+    const priceUsd = new Decimal(data.c);
+    return { priceUsd, priceInr: priceUsd.mul(usdToInr) };
   }
 
   private async fetchAmfi(schemeCode: string): Promise<Decimal | null> {

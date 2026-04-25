@@ -1,5 +1,11 @@
 import { apiGet } from "@/lib/api";
-import { formatCurrency, formatCurrencyShort, formatDate, formatPercent } from "@/lib/formatters";
+import {
+  formatCurrency,
+  formatCurrencyShort,
+  formatDate,
+  formatNativeAndInr,
+  formatPercent,
+} from "@/lib/formatters";
 import { AssetDetail, PortfolioAsset } from "@/types";
 import { AssetSelector } from "@/components/portfolio/AssetSelector";
 
@@ -27,10 +33,23 @@ export default async function AssetDetailPage({
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <MetricCard
           label="Current Value"
-          value={detail.currentValue ? formatCurrency(detail.currentValue) : "—"}
+          value={
+            detail.currentValue
+              ? detail.nativeCurrency && detail.currentValueNative
+                ? formatNativeAndInr(detail.currentValueNative, detail.currentValue)
+                : formatCurrency(detail.currentValue)
+              : "—"
+          }
         />
         <MetricCard label="Units Held" value={detail.totalUnits} />
-        <MetricCard label="Avg Cost" value={formatCurrency(detail.avgCost)} />
+        <MetricCard
+          label="Avg Cost"
+          value={
+            detail.nativeCurrency && detail.nativeAvgCost
+              ? formatNativeAndInr(detail.nativeAvgCost, detail.avgCost)
+              : formatCurrency(detail.avgCost)
+          }
+        />
         <MetricCard
           label="XIRR"
           value={detail.xirr ? formatPercent(parseFloat(detail.xirr)) : "—"}
@@ -93,9 +112,17 @@ export default async function AssetDetailPage({
                   <td className="px-4 py-3 capitalize">{lot.type}</td>
                   <td className="px-4 py-3 text-right">{lot.units}</td>
                   <td className="px-4 py-3 text-right">{formatCurrencyShort(lot.buyPrice)}</td>
-                  <td className="px-4 py-3 text-right">{formatCurrencyShort(lot.cost)}</td>
                   <td className="px-4 py-3 text-right">
-                    {lot.currentValue ? formatCurrencyShort(lot.currentValue) : "—"}
+                    {lot.costNative
+                      ? formatNativeAndInr(lot.costNative, lot.cost)
+                      : formatCurrencyShort(lot.cost)}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    {lot.currentValueNative && lot.currentValue
+                      ? formatNativeAndInr(lot.currentValueNative, lot.currentValue)
+                      : lot.currentValue
+                        ? formatCurrencyShort(lot.currentValue)
+                        : "—"}
                   </td>
                   <td className="text-muted-foreground px-4 py-3 text-right">
                     {lot.xirr ? formatPercent(parseFloat(lot.xirr)) : "—"}

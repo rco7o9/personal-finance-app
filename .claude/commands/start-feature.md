@@ -7,4 +7,3 @@ State your understanding of:
 - What this session will NOT touch (explicit scope boundary)
 - Confirm scope with the user before doing anything else
 - Once the scope is confirmed, activate /spec command
-
