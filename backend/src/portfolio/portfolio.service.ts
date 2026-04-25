@@ -2,6 +2,7 @@ import { Injectable, Inject } from "@nestjs/common";
 import { Pool } from "pg";
 import Decimal from "decimal.js";
 import { AssetPriceService, AssetPriceRow } from "../asset-price/asset-price.service";
+import { xirr, CashFlow } from "./xirr";
 
 type PositionRow = {
   asset_id: number;
@@ -49,6 +50,13 @@ type AssetListRow = {
   platform: string;
 };
 
+type XirrFlowRow = {
+  transacted_at: Date;
+  type: string;
+  amount_inr: string;
+  category_id: number;
+};
+
 const SUGGESTION_THRESHOLD = new Decimal("3");
 const REFRESH_SLEEP_MS = 1000;
 
@@ -62,7 +70,11 @@ export class PortfolioService {
   ) {}
 
   async getSummary() {
-    const [positions, targets] = await Promise.all([this.queryPositions(), this.queryTargets()]);
+    const [positions, targets, flows] = await Promise.all([
+      this.queryPositions(),
+      this.queryTargets(),
+      this.queryXirrFlows(),
+    ]);
 
     const targetMap = new Map(targets.map((t) => [t.category_id, t]));
 
@@ -77,10 +89,20 @@ export class PortfolioService {
     );
 
     const byAssetClass = this.groupByAssetClass(positionsWithValue, totalValue, targetMap);
-
     const byPlatform = this.groupByPlatform(positionsWithValue);
 
-    const rebalancingSuggestions = byAssetClass
+    const today = new Date();
+    const overallXirr = this.computePortfolioXirr(flows, totalValue, today);
+    const byAssetClassWithXirr = byAssetClass.map((c) => ({
+      ...c,
+      xirr: this.computeClassXirr(
+        flows.filter((f) => f.category_id === c.categoryId),
+        new Decimal(c.value),
+        today,
+      ),
+    }));
+
+    const rebalancingSuggestions = byAssetClassWithXirr
       .filter((c) => c.delta !== null && new Decimal(c.delta).abs().gt(SUGGESTION_THRESHOLD))
       .map((c) => {
         const delta = new Decimal(c.delta!);
@@ -95,8 +117,8 @@ export class PortfolioService {
 
     return {
       totalValue: totalValue.toFixed(2),
-      overallXirr: null,
-      byAssetClass,
+      overallXirr,
+      byAssetClass: byAssetClassWithXirr,
       byPlatform,
       rebalancingSuggestions,
     };
@@ -163,8 +185,18 @@ export class PortfolioService {
     const absoluteReturnPct =
       unrealisedGain && totalInvested.gt(0) ? unrealisedGain.div(totalInvested).mul(100) : null;
 
+    const today = new Date();
+
     const lots = lotsRes.rows.map((lot) => {
       const lotValue = currentPrice ? new Decimal(lot.quantity).mul(currentPrice) : null;
+      let lotXirr: string | null = null;
+      if (lot.type === "buy" && lotValue && currentPrice) {
+        lotXirr = this.computeXirrFromFlows(
+          [{ date: lot.date, amount: -parseFloat(lot.amount_inr) }],
+          lotValue,
+          today,
+        );
+      }
       return {
         id: lot.id,
         date: lot.date,
@@ -173,9 +205,18 @@ export class PortfolioService {
         buyPrice: lot.price,
         cost: lot.amount_inr,
         currentValue: lotValue ? lotValue.toFixed(2) : null,
-        xirr: null,
+        xirr: lotXirr,
       };
     });
+
+    // Asset-level XIRR: all confirmed transactions + terminal value
+    const assetFlows: CashFlow[] = lotsRes.rows.map((lot) => ({
+      date: lot.date,
+      amount: lot.type === "buy" ? -parseFloat(lot.amount_inr) : parseFloat(lot.amount_inr),
+    }));
+    const assetXirr = currentValue
+      ? this.computeXirrFromFlows(assetFlows, currentValue, today)
+      : null;
 
     return {
       assetName: h.asset_name,
@@ -184,7 +225,7 @@ export class PortfolioService {
       avgCost: h.avg_cost,
       unrealisedGain: unrealisedGain ? unrealisedGain.toFixed(2) : null,
       absoluteReturnPct: absoluteReturnPct ? absoluteReturnPct.toFixed(2) : null,
-      xirr: null,
+      xirr: assetXirr,
       lots,
     };
   }
@@ -326,6 +367,50 @@ export class PortfolioService {
         xirr: null,
       };
     });
+  }
+
+  private async queryXirrFlows(): Promise<XirrFlowRow[]> {
+    const result = await this.pool.query<XirrFlowRow>(
+      `SELECT it.transacted_at, it.type, it.amount_inr::text, ic.id AS category_id
+       FROM investment_transaction it
+       JOIN asset a ON a.id = it.asset_id
+       JOIN investment_category ic ON ic.id = a.investment_category_id
+       WHERE it.status = 'confirmed'
+       ORDER BY it.transacted_at`,
+    );
+    return result.rows;
+  }
+
+  private computeXirrFromFlows(
+    flows: CashFlow[],
+    terminalValue: Decimal,
+    today: Date,
+  ): string | null {
+    const allFlows = [...flows, { date: today, amount: terminalValue.toNumber() }];
+    const rate = xirr(allFlows);
+    return rate !== null ? (rate * 100).toFixed(2) : null;
+  }
+
+  private computePortfolioXirr(
+    flows: XirrFlowRow[],
+    totalValue: Decimal,
+    today: Date,
+  ): string | null {
+    if (totalValue.lte(0)) return null;
+    const cashFlows: CashFlow[] = flows.map((f) => ({
+      date: f.transacted_at,
+      amount: f.type === "buy" ? -parseFloat(f.amount_inr) : parseFloat(f.amount_inr),
+    }));
+    return this.computeXirrFromFlows(cashFlows, totalValue, today);
+  }
+
+  private computeClassXirr(flows: XirrFlowRow[], classValue: Decimal, today: Date): string | null {
+    if (classValue.lte(0) || flows.length === 0) return null;
+    const cashFlows: CashFlow[] = flows.map((f) => ({
+      date: f.transacted_at,
+      amount: f.type === "buy" ? -parseFloat(f.amount_inr) : parseFloat(f.amount_inr),
+    }));
+    return this.computeXirrFromFlows(cashFlows, classValue, today);
   }
 
   private groupByPlatform(positions: (PositionRow & { currentValue: Decimal | null })[]) {

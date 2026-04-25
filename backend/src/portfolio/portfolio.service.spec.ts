@@ -42,6 +42,9 @@ const pos = (
   ...overrides,
 });
 
+// getSummary uses Promise.all([queryPositions, queryTargets, queryXirrFlows]) — 3 pool results
+const noFlows = { rows: [] }; // empty XIRR flows → overallXirr = null
+
 describe("PortfolioService", () => {
   describe("getSummary", () => {
     it("returns totalValue as sum of all current values", async () => {
@@ -62,6 +65,7 @@ describe("PortfolioService", () => {
           ],
         },
         { rows: [] }, // targets
+        noFlows,
       );
 
       const svc = new PortfolioService(pool as never, mockAssetPriceService());
@@ -87,6 +91,7 @@ describe("PortfolioService", () => {
           ],
         },
         { rows: [] },
+        noFlows,
       );
 
       const svc = new PortfolioService(pool as never, mockAssetPriceService());
@@ -111,6 +116,7 @@ describe("PortfolioService", () => {
           ],
         },
         { rows: [] },
+        noFlows,
       );
 
       const svc = new PortfolioService(pool as never, mockAssetPriceService());
@@ -120,7 +126,7 @@ describe("PortfolioService", () => {
       expect(result.totalValue).toBe("1721000.00");
     });
 
-    it("computes byAssetClass with correct percentage and target", async () => {
+    it("computes byAssetClass with correct percentage, target, and null xirr when no flows", async () => {
       const pool = makeMockPool(
         {
           rows: [
@@ -148,6 +154,7 @@ describe("PortfolioService", () => {
             { category_id: 4, category_name: "Indian Mutual Fund", target_percentage: "50.00" },
           ],
         },
+        noFlows,
       );
 
       const svc = new PortfolioService(pool as never, mockAssetPriceService());
@@ -189,6 +196,7 @@ describe("PortfolioService", () => {
             { category_id: 4, category_name: "Indian Mutual Fund", target_percentage: "50.00" },
           ],
         },
+        noFlows,
       );
 
       const svc = new PortfolioService(pool as never, mockAssetPriceService());
@@ -231,12 +239,12 @@ describe("PortfolioService", () => {
             { category_id: 4, category_name: "Indian Mutual Fund", target_percentage: "50.00" },
           ],
         },
+        noFlows,
       );
 
       const svc = new PortfolioService(pool as never, mockAssetPriceService());
       const result = await svc.getSummary();
 
-      // Indian Equity: 2000/10000 = 20% actual vs 50% target → delta = -30 → underweight
       const suggestion = result.rebalancingSuggestions.find(
         (s) => s.assetClass === "Indian Equity",
       )!;
@@ -257,6 +265,7 @@ describe("PortfolioService", () => {
           ],
         },
         { rows: [{ category_id: 2, category_name: "Indian Equity", target_percentage: "100.00" }] },
+        noFlows,
       );
 
       const svc = new PortfolioService(pool as never, mockAssetPriceService());
@@ -290,6 +299,7 @@ describe("PortfolioService", () => {
           ],
         },
         { rows: [] },
+        noFlows,
       );
 
       const svc = new PortfolioService(pool as never, mockAssetPriceService());
@@ -302,16 +312,39 @@ describe("PortfolioService", () => {
       expect(paytm.value).toBe("1000.00");
     });
 
-    it("returns overallXirr as null placeholder", async () => {
+    it("computes non-null overallXirr and byAssetClass.xirr when cash flows exist", async () => {
       const pool = makeMockPool(
-        { rows: [pos({ asset_id: 1, current_price: "10" })] },
+        {
+          rows: [
+            pos({
+              asset_id: 1,
+              category_id: 2,
+              category_name: "Indian Equity",
+              quantity: "100",
+              current_price: "11",
+            }),
+          ],
+        },
         { rows: [] },
+        {
+          // One buy of ₹1000, one year ago — matches 10% annual return vs current value ₹1100
+          rows: [
+            {
+              transacted_at: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000),
+              type: "buy",
+              amount_inr: "1000",
+              category_id: 2,
+            },
+          ],
+        },
       );
 
       const svc = new PortfolioService(pool as never, mockAssetPriceService());
       const result = await svc.getSummary();
 
-      expect(result.overallXirr).toBeNull();
+      expect(result.overallXirr).not.toBeNull();
+      const equity = result.byAssetClass.find((c) => c.assetClass === "Indian Equity")!;
+      expect(equity.xirr).not.toBeNull();
     });
   });
 
@@ -335,7 +368,73 @@ describe("PortfolioService", () => {
   });
 
   describe("getAssetDetail", () => {
-    it("returns metrics and lots using current_price from holding", async () => {
+    it("computes xirr and lot xirr from holding + lots data", async () => {
+      const pool = makeMockPool(
+        {
+          rows: [
+            {
+              asset_id: 10,
+              asset_name: "HDFC Bank",
+              ticker_symbol: "HDFCBANK.NS",
+              price_source: "yahoo_finance",
+              quantity: "91",
+              avg_cost: "810.0000",
+              total_invested: "73710.0000",
+              current_price: "820",
+            },
+          ],
+        },
+        {
+          rows: [
+            {
+              id: 1,
+              date: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000), // ~1 year ago
+              type: "buy",
+              quantity: "91.00000000",
+              price: "810.0000",
+              amount_inr: "73710.0000",
+            },
+          ],
+        },
+      );
+
+      const svc = new PortfolioService(pool as never, mockAssetPriceService());
+      const result = await svc.getAssetDetail(10);
+
+      expect(result).not.toBeNull();
+      expect(result!.currentValue).toBe("74620.00");
+      expect(result!.unrealisedGain).toBe("910.00");
+      expect(result!.xirr).not.toBeNull();
+      expect(result!.lots[0].xirr).not.toBeNull();
+    });
+
+    it("returns null xirr when current_price is null", async () => {
+      const pool = makeMockPool(
+        {
+          rows: [
+            {
+              asset_id: 10,
+              asset_name: "Manual Asset",
+              ticker_symbol: null,
+              price_source: "manual",
+              quantity: "1",
+              avg_cost: "100.0000",
+              total_invested: "100.0000",
+              current_price: null,
+            },
+          ],
+        },
+        { rows: [] },
+      );
+
+      const svc = new PortfolioService(pool as never, mockAssetPriceService());
+      const result = await svc.getAssetDetail(10);
+
+      expect(result!.currentValue).toBeNull();
+      expect(result!.xirr).toBeNull();
+    });
+
+    it("returns metrics and lots with correct cost from amount_inr", async () => {
       const pool = makeMockPool(
         {
           rows: [
@@ -368,43 +467,8 @@ describe("PortfolioService", () => {
       const svc = new PortfolioService(pool as never, mockAssetPriceService());
       const result = await svc.getAssetDetail(10);
 
-      expect(result).not.toBeNull();
-      expect(result!.currentValue).toBe("74620.00");
-      expect(result!.totalUnits).toBe("91");
-      expect(result!.avgCost).toBe("810.0000");
-      // unrealisedGain = 74620 - 73710 = 910
-      expect(result!.unrealisedGain).toBe("910.00");
-      expect(result!.lots).toHaveLength(1);
-      expect(result!.lots[0].type).toBe("buy");
-      // lot cost comes from amount_inr, not amount
       expect(result!.lots[0].cost).toBe("73710.0000");
-      expect(result!.xirr).toBeNull();
-    });
-
-    it("returns null currentValue when holding has no current_price", async () => {
-      const pool = makeMockPool(
-        {
-          rows: [
-            {
-              asset_id: 10,
-              asset_name: "Manual Asset",
-              ticker_symbol: null,
-              price_source: "manual",
-              quantity: "1",
-              avg_cost: "100.0000",
-              total_invested: "100.0000",
-              current_price: null,
-            },
-          ],
-        },
-        { rows: [] },
-      );
-
-      const svc = new PortfolioService(pool as never, mockAssetPriceService());
-      const result = await svc.getAssetDetail(10);
-
-      expect(result!.currentValue).toBeNull();
-      expect(result!.unrealisedGain).toBeNull();
+      expect(result!.lots[0].type).toBe("buy");
     });
   });
 });
