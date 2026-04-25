@@ -1,6 +1,6 @@
 # System Documentation — Personal Finance Tracker
 
-> Last updated: 2026-04-25 (session 4 — Phase 2a backend + frontend built; blocked on Docker env vars)
+> Last updated: 2026-04-25 (session 6 — Phase 2b pre-work: portfolio redesigned as household-wide, cached prices, explicit refresh CTA)
 > Update this file at the end of every session via `/end-session` after verifying changes.
 
 ---
@@ -23,7 +23,7 @@ security boundary.
 |-------|-----------|-------------|
 | 1 — Foundation        | ✅ Done   | Docker Compose, NestJS + Next.js scaffolds, pre-commit hooks |
 | 1b — DB Schema        | ✅ Done   | `001_init.sql` + `002_investment_v2.sql`: all enums, tables, seed data |
-| 2a — Portfolio view   | 🔄 In Progress | Portfolio overview, allocation vs target, live prices — blocked on Docker env vars |
+| 2a — Portfolio view   | ✅ Done   | Portfolio overview, allocation vs target, live prices (47/56 holdings; 9 illiquid/SGB have no free API) |
 | 2b — XIRR             | Pending   | XIRR per portfolio, asset class, lot |
 | 3 — Statement ingestion | Pending | Upload PDF/CSV → Claude AI parse → HITL review → commit |
 | 4 — Expense reporting | Pending   | Monthly + YTD views, budget vs actual, per-person attribution |
@@ -230,12 +230,16 @@ asset (1) ──→ holding (1, household-wide derived state)
 
 ### Portfolio module (`/portfolio`)
 
+Portfolio is **household-wide** — no `personId` filtering. All endpoints return aggregate data
+across both persons. `holding.current_price` is used for all value calculations — no live price
+fetches in the read path. See ADR-015.
+
 | Method | Path | Query | Description |
 |--------|------|-------|-------------|
-| GET | `/portfolio/summary` | `personId` | Total value, byAssetClass (% + delta vs target), byPlatform, rebalancing suggestions |
-| GET | `/portfolio/assets` | `personId` | List of assets held by person (id, name, assetClass, platform) |
-| GET | `/portfolio/assets/:assetId` | `personId` | Asset detail: metrics + lot table |
-| POST | `/portfolio/holdings/refresh` | — | Fetches live prices for all non-manual assets, writes to `holding.current_price` |
+| GET | `/portfolio/summary` | — | Household total value, byAssetClass (% + delta vs target), byPlatform, rebalancing suggestions. Reads `holding.current_price` from DB — no live API calls. |
+| GET | `/portfolio/assets` | — | All assets held across the household (id, name, assetClass, platform) |
+| GET | `/portfolio/assets/:assetId` | — | Asset detail: metrics + lot table (all household transactions) |
+| POST | `/portfolio/holdings/refresh` | — | Fetches live prices for all non-manual assets, writes to `holding.current_price`. Adds 500ms sleep between Indian stock API chunks to avoid rate limits. |
 
 ---
 
@@ -250,8 +254,9 @@ Six screens planned (wireframes at `wireframes.html`):
 5. **Portfolio overview** — total value, XIRR, actual vs target allocation, by-platform cards, rebalancing suggestions
 6. **Asset breakup** — per-asset drill-down: lots, price history, P&L, lot-wise XIRR
 
-Portfolio values (current price, unrealised gain, XIRR) are computed at runtime by
-fetching live prices — no price snapshot table in the schema.
+Portfolio values (current price, unrealised gain, XIRR) are read from `holding.current_price`
+stored in the DB. Live prices are fetched only on explicit "Refresh Prices" CTA — no live
+calls on portfolio page load. See ADR-015.
 
 ---
 
@@ -266,9 +271,12 @@ fetching live prices — no price snapshot table in the schema.
 | ADR-005 | Money as NUMERIC(18,4), quantities as NUMERIC(18,8) — never FLOAT               |
 | ADR-006 | Docker Compose as the sole development environment                               |
 | ADR-007 | Portfolio values computed at runtime via live price fetching — no snapshot table |
-| ADR-008 | Price API choices (Finnhub, mfapi.in, CoinGecko, Metals-API, Frankfurter) — partially superseded by ADR-013 |
+| ADR-008 | Price API choices (Finnhub, mfapi.in, CoinGecko, Metals-API, Frankfurter) — partially superseded by ADR-013, ADR-014 |
 | ADR-009 | In-memory price cache (Map, TTL 5 min, no Redis in Phase 2a)                    |
 | ADR-010 | Immutable ledger pattern: investment_transaction + holding replaces investment   |
 | ADR-011 | Internal transfer detection via transfer_type on expense                        |
 | ADR-012 | Portfolio inception date seeding strategy (April 1, 2026)                       |
 | ADR-013 | Replace Metals-API with GoldAPI for physical gold pricing                       |
+| ADR-014 | Indian Stock Market API for NSE/BSE equity pricing (replaces Finnhub for .NS/.BO tickers) |
+| ADR-015 | Portfolio is household-wide; prices from cached holding table with explicit refresh (supersedes ADR-007) |
+| ADR-016 | Fix price coverage gaps: ACME missing holding record, SGBs → gold_api, BSE stocks .NS → .BO |
