@@ -14,6 +14,9 @@ type CacheEntry = { priceInr: Decimal; fetchedAt: Date };
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const INDIAN_STOCK_API = "http://65.0.104.9";
+const REFRESH_SLEEP_MS = 1000;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 @Injectable()
 export class AssetPriceService {
@@ -87,8 +90,9 @@ export class AssetPriceService {
     }
 
     const chunkResults: Map<number, Decimal | null>[] = [];
-    for (const chunk of chunks) {
-      chunkResults.push(await this.fetchIndianStockChunk(chunk));
+    for (let i = 0; i < chunks.length; i++) {
+      if (i > 0) await sleep(REFRESH_SLEEP_MS);
+      chunkResults.push(await this.fetchIndianStockChunk(chunks[i]));
     }
 
     return new Map(chunkResults.flatMap((m) => [...m]));
@@ -134,18 +138,16 @@ export class AssetPriceService {
 
   private async batchFetchFinnhub(assets: AssetPriceRow[]): Promise<Map<number, Decimal | null>> {
     if (assets.length === 0) return new Map();
-    const usdToInr = await this.currencyService.getUsdToInr();
-    const results = await Promise.all(
-      assets.map(async (a) => {
-        try {
-          const price = await this.fetchFinnhub(a.ticker_symbol!);
-          return [a.id, price] as [number, Decimal | null];
-        } catch {
-          return [a.id, null] as [number, Decimal | null];
-        }
-      }),
-    );
-    void usdToInr; // already used inside fetchFinnhub via getUsdToInr
+    const results: [number, Decimal | null][] = [];
+    for (let i = 0; i < assets.length; i++) {
+      if (i > 0) await sleep(REFRESH_SLEEP_MS);
+      try {
+        const price = await this.fetchFinnhub(assets[i].ticker_symbol!);
+        results.push([assets[i].id, price]);
+      } catch {
+        results.push([assets[i].id, null]);
+      }
+    }
     return new Map(results);
   }
 

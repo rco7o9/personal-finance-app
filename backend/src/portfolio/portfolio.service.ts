@@ -39,7 +39,7 @@ type LotRow = {
   type: string;
   quantity: string;
   price: string;
-  amount: string;
+  amount_inr: string;
 };
 
 type AssetListRow = {
@@ -50,6 +50,9 @@ type AssetListRow = {
 };
 
 const SUGGESTION_THRESHOLD = new Decimal("3");
+const REFRESH_SLEEP_MS = 1000;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 @Injectable()
 export class PortfolioService {
@@ -58,19 +61,14 @@ export class PortfolioService {
     private readonly assetPriceService: AssetPriceService,
   ) {}
 
-  async getSummary(personId: number) {
-    const [positions, targets] = await Promise.all([
-      this.queryPositions(personId),
-      this.queryTargets(),
-    ]);
+  async getSummary() {
+    const [positions, targets] = await Promise.all([this.queryPositions(), this.queryTargets()]);
 
-    const priceMap = await this.fetchPrices(positions);
     const targetMap = new Map(targets.map((t) => [t.category_id, t]));
 
-    // Compute current value per position
     const positionsWithValue = positions.map((p) => ({
       ...p,
-      currentValue: this.computeCurrentValue(p, priceMap),
+      currentValue: this.computeCurrentValue(p),
     }));
 
     const totalValue = positionsWithValue.reduce(
@@ -97,13 +95,14 @@ export class PortfolioService {
 
     return {
       totalValue: totalValue.toFixed(2),
+      overallXirr: null,
       byAssetClass,
       byPlatform,
       rebalancingSuggestions,
     };
   }
 
-  async getAssets(personId: number) {
+  async getAssets() {
     const result = await this.pool.query<AssetListRow>(
       `SELECT DISTINCT ON (a.id)
          a.id,
@@ -114,9 +113,8 @@ export class PortfolioService {
        JOIN asset a ON a.id = it.asset_id
        JOIN investment_category ic ON ic.id = a.investment_category_id
        JOIN financial_institution fi ON fi.id = it.financial_institution_id
-       WHERE it.person_id = $1 AND it.status = 'confirmed'
+       WHERE it.status = 'confirmed'
        ORDER BY a.id`,
-      [personId],
     );
 
     return result.rows.map((r) => ({
@@ -127,7 +125,7 @@ export class PortfolioService {
     }));
   }
 
-  async getAssetDetail(assetId: number, personId: number) {
+  async getAssetDetail(assetId: number) {
     const [holdingRes, lotsRes] = await Promise.all([
       this.pool.query<HoldingRow>(
         `SELECT
@@ -146,26 +144,18 @@ export class PortfolioService {
       ),
       this.pool.query<LotRow>(
         `SELECT id, transacted_at AS date, type,
-                quantity::text, price::text, amount::text
+                quantity::text, price::text, amount_inr::text
          FROM investment_transaction
-         WHERE asset_id = $1 AND person_id = $2 AND status = 'confirmed'
+         WHERE asset_id = $1 AND status = 'confirmed'
          ORDER BY transacted_at DESC`,
-        [assetId, personId],
+        [assetId],
       ),
     ]);
 
     const h = holdingRes.rows[0];
     if (!h) return null;
 
-    const priceRow: AssetPriceRow = {
-      id: h.asset_id,
-      ticker_symbol: h.ticker_symbol,
-      price_source: h.price_source as AssetPriceRow["price_source"],
-    };
-
-    const fetchedPrice = await this.assetPriceService.getPriceInr(priceRow);
-    const currentPrice = fetchedPrice ?? (h.current_price ? new Decimal(h.current_price) : null);
-
+    const currentPrice = h.current_price ? new Decimal(h.current_price) : null;
     const qty = new Decimal(h.quantity);
     const totalInvested = new Decimal(h.total_invested);
     const currentValue = currentPrice ? qty.mul(currentPrice) : null;
@@ -181,7 +171,7 @@ export class PortfolioService {
         type: lot.type,
         units: lot.quantity,
         buyPrice: lot.price,
-        cost: lot.amount,
+        cost: lot.amount_inr,
         currentValue: lotValue ? lotValue.toFixed(2) : null,
         xirr: null,
       };
@@ -222,14 +212,15 @@ export class PortfolioService {
       }
     }
 
-    // Batch all yahoo_finance tickers into one API call to avoid rate limiting
     const yahooPrices = await this.assetPriceService.batchFetchYahooFinancePrices(yahooAssets);
 
-    // Fetch other sources in parallel (amfi, coinmarketcap, gold_api)
-    const otherPricesArr = await Promise.all(
-      otherAssets.map((a) => this.assetPriceService.getPriceInr(a)),
-    );
-    const otherPrices = new Map(otherAssets.map((a, i) => [a.id, otherPricesArr[i]]));
+    // Non-Yahoo sources (amfi, coinmarketcap, gold_api) fetched sequentially to avoid rate limits
+    const otherPrices = new Map<number, Decimal | null>();
+    for (let i = 0; i < otherAssets.length; i++) {
+      const price = await this.assetPriceService.getPriceInr(otherAssets[i]);
+      otherPrices.set(otherAssets[i].id, price);
+      if (i < otherAssets.length - 1) await sleep(REFRESH_SLEEP_MS);
+    }
 
     const allPrices = new Map([...yahooPrices, ...otherPrices]);
 
@@ -256,30 +247,29 @@ export class PortfolioService {
 
   // ── private helpers ──────────────────────────────────────────────────────
 
-  private async queryPositions(personId: number): Promise<PositionRow[]> {
+  private async queryPositions(): Promise<PositionRow[]> {
     const result = await this.pool.query<PositionRow>(
       `SELECT
-         a.id                                                                        AS asset_id,
-         a.name                                                                      AS asset_name,
+         a.id                                                                              AS asset_id,
+         a.name                                                                            AS asset_name,
          a.ticker_symbol,
          a.price_source::text,
-         ic.id                                                                       AS category_id,
-         ic.name                                                                     AS category_name,
-         fi.name                                                                     AS platform,
-         SUM(CASE WHEN it.type = 'buy' THEN it.quantity ELSE -it.quantity END)::text AS quantity,
-         SUM(CASE WHEN it.type = 'buy' THEN it.amount  ELSE -it.amount  END)::text  AS total_invested,
+         ic.id                                                                             AS category_id,
+         ic.name                                                                           AS category_name,
+         fi.name                                                                           AS platform,
+         SUM(CASE WHEN it.type = 'buy' THEN it.quantity    ELSE -it.quantity    END)::text AS quantity,
+         SUM(CASE WHEN it.type = 'buy' THEN it.amount_inr  ELSE -it.amount_inr  END)::text AS total_invested,
          h.current_price::text
        FROM investment_transaction it
        JOIN asset a ON a.id = it.asset_id
        JOIN investment_category ic ON ic.id = a.investment_category_id
        JOIN financial_institution fi ON fi.id = it.financial_institution_id
        LEFT JOIN holding h ON h.asset_id = a.id
-       WHERE it.person_id = $1 AND it.status = 'confirmed'
+       WHERE it.status = 'confirmed'
        GROUP BY a.id, a.name, a.ticker_symbol, a.price_source,
                 ic.id, ic.name, fi.name, h.current_price
        HAVING SUM(CASE WHEN it.type = 'buy' THEN it.quantity ELSE -it.quantity END) > 0
        ORDER BY ic.name, a.name`,
-      [personId],
     );
     return result.rows;
   }
@@ -295,34 +285,9 @@ export class PortfolioService {
     return result.rows;
   }
 
-  private async fetchPrices(positions: PositionRow[]): Promise<Map<number, Decimal | null>> {
-    const unique = [...new Map(positions.map((p) => [p.asset_id, p])).values()];
-
-    const prices = await Promise.all(
-      unique.map((p) =>
-        this.assetPriceService.getPriceInr({
-          id: p.asset_id,
-          ticker_symbol: p.ticker_symbol,
-          price_source: p.price_source as AssetPriceRow["price_source"],
-        }),
-      ),
-    );
-
-    return new Map(unique.map((p, i) => [p.asset_id, prices[i]]));
-  }
-
-  private computeCurrentValue(
-    p: PositionRow,
-    priceMap: Map<number, Decimal | null>,
-  ): Decimal | null {
-    const qty = new Decimal(p.quantity);
-
-    if (p.price_source === "manual") {
-      return p.current_price ? qty.mul(new Decimal(p.current_price)) : null;
-    }
-
-    const price = priceMap.get(p.asset_id);
-    return price ? qty.mul(price) : null;
+  private computeCurrentValue(p: PositionRow): Decimal | null {
+    if (!p.current_price) return null;
+    return new Decimal(p.quantity).mul(new Decimal(p.current_price));
   }
 
   private groupByAssetClass(
@@ -358,6 +323,7 @@ export class PortfolioService {
         percentage: pct.toFixed(2),
         targetPercentage: targetPct ? targetPct.toFixed(2) : null,
         delta: delta ? delta.toFixed(2) : null,
+        xirr: null,
       };
     });
   }
