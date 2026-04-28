@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { DM_Sans, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const dmSans = DM_Sans({
+  variable: "--font-dm-sans",
   subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
 });
 
 const geistMono = Geist_Mono({
@@ -17,16 +18,17 @@ export const metadata: Metadata = {
   description: "Personal family finance tracker for Arjun & Priya",
 };
 
-// This is the root layout — it wraps every page in the entire app.
-// It's a SERVER component by default (no "use client" at the top).
-// It renders once on the server and sends HTML to the browser.
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${dmSans.variable} ${geistMono.variable} dark h-full antialiased`}
+    >
       <body className="bg-background text-foreground h-full">{children}</body>
     </html>
   );

@@ -53,6 +53,7 @@ export default async function AssetDetailPage({
         <MetricCard
           label="XIRR"
           value={detail.xirr ? formatPercent(parseFloat(detail.xirr)) : "—"}
+          valueClassName="text-[var(--color-positive)]"
         />
       </div>
 
@@ -67,8 +68,8 @@ export default async function AssetDetailPage({
             <p
               className={`mt-1 text-lg font-semibold ${
                 detail.unrealisedGain && parseFloat(detail.unrealisedGain) >= 0
-                  ? "text-green-600"
-                  : "text-red-500"
+                  ? "text-green-400"
+                  : "text-red-400"
               }`}
             >
               {detail.unrealisedGain ? formatCurrency(detail.unrealisedGain) : "—"}
@@ -79,8 +80,8 @@ export default async function AssetDetailPage({
             <p
               className={`mt-1 text-lg font-semibold ${
                 detail.absoluteReturnPct && parseFloat(detail.absoluteReturnPct) >= 0
-                  ? "text-green-600"
-                  : "text-red-500"
+                  ? "text-green-400"
+                  : "text-red-400"
               }`}
             >
               {detail.absoluteReturnPct ? formatPercent(parseFloat(detail.absoluteReturnPct)) : "—"}
@@ -137,11 +138,19 @@ export default async function AssetDetailPage({
   );
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
+function MetricCard({
+  label,
+  value,
+  valueClassName,
+}: {
+  label: string;
+  value: React.ReactNode;
+  valueClassName?: string;
+}) {
   return (
     <div className="rounded-lg border p-4">
       <p className="text-muted-foreground text-xs tracking-wide uppercase">{label}</p>
-      <p className="mt-2 text-xl font-semibold">{value}</p>
+      <p className={`mt-2 text-xl font-semibold ${valueClassName ?? ""}`}>{value}</p>
     </div>
   );
 }
