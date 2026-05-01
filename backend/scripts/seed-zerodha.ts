@@ -1,11 +1,12 @@
 /**
  * Parses all Zerodha FY CSV files and writes into staging tables.
- * Aggregates partial fills by order_id: sum(qty), weighted-avg price, earliest execution date.
+ * Each trade row is inserted as-is — one investment_transaction_stage row per CSV row.
  * Fetches real company names from Yahoo Finance for each unique ticker (falls back to symbol).
  *
- * Idempotency: staging tables have no platform column — to re-run from scratch, TRUNCATE
- * asset_stage and investment_transaction_stage first (in CloudBeaver or via psql).
- * asset_stage uses ON CONFLICT (name) DO UPDATE so re-inserting the same asset is safe.
+ * Idempotency: TRUNCATE asset_stage CASCADE before re-running (also clears
+ * investment_transaction_stage and holding_stage via FK cascade).
+ * asset_stage uses ON CONFLICT (name) DO UPDATE so the same asset across multiple files
+ * is upserted rather than duplicated.
  *
  * Run: cd backend && npx ts-node --project tsconfig.scripts.json scripts/seed-zerodha.ts
  */
@@ -118,18 +119,9 @@ async function run(): Promise<void> {
       const rows = parse(content, { columns: true, skip_empty_lines: true }) as CsvRow[];
       allRows.push(...rows);
     }
-    console.log(`Total raw rows: ${allRows.length}`);
+    console.log(`Total rows: ${allRows.length}`);
 
-    // Group partial fills by order_id
-    const orderMap = new Map<string, CsvRow[]>();
-    for (const row of allRows) {
-      const fills = orderMap.get(row.order_id) ?? [];
-      fills.push(row);
-      orderMap.set(row.order_id, fills);
-    }
-    console.log(`Unique orders after aggregation: ${orderMap.size}`);
-
-    // Aggregate each order and collect unique assets keyed by ISIN
+    // Collect unique assets by ISIN for asset_stage
     type AssetEntry = {
       symbol: string;
       name: string;
@@ -137,53 +129,22 @@ async function run(): Promise<void> {
       tickerSymbol: string;
       exchange: string;
     };
-    type AggOrder = {
-      isin: string;
-      type: string;
-      totalQty: Decimal;
-      totalAmount: Decimal;
-      weightedPrice: Decimal;
-      transactedAt: string;
-    };
+
+    // Key by isin when present; fall back to symbol for rows where ISIN is blank.
+    // Empty-ISIN rows from BSE must not all collapse to the same map entry.
+    const assetKey = (row: CsvRow) => row.isin || row.symbol;
 
     const assetByIsin = new Map<string, AssetEntry>();
-    const orders: AggOrder[] = [];
-
-    for (const [, fills] of orderMap) {
-      const first = fills[0];
-
-      let totalQty = new Decimal(0);
-      let totalAmount = new Decimal(0);
-      let earliestTime = first.order_execution_time;
-
-      for (const fill of fills) {
-        const qty = new Decimal(fill.quantity);
-        const price = new Decimal(fill.price);
-        totalQty = totalQty.plus(qty);
-        totalAmount = totalAmount.plus(qty.times(price));
-        if (fill.order_execution_time < earliestTime) {
-          earliestTime = fill.order_execution_time;
-        }
-      }
-
-      const weightedPrice = totalQty.gt(0) ? totalAmount.div(totalQty) : new Decimal(0);
-      orders.push({
-        isin: first.isin,
-        type: first.trade_type,
-        totalQty,
-        totalAmount,
-        weightedPrice,
-        transactedAt: earliestTime.substring(0, 10),
-      });
-
-      if (!assetByIsin.has(first.isin)) {
-        const suffix = first.exchange === "BSE" ? "BO" : "NS";
-        assetByIsin.set(first.isin, {
-          symbol: first.symbol,
-          name: first.symbol, // placeholder — overwritten by Yahoo Finance lookup below
-          categoryId: first.isin === GOLD_ETF_ISIN ? refs.goldId : refs.indianEquityId,
-          tickerSymbol: `${first.symbol}.${suffix}`,
-          exchange: first.exchange,
+    for (const row of allRows) {
+      const key = assetKey(row);
+      if (!assetByIsin.has(key)) {
+        const suffix = row.exchange === "BSE" ? "BO" : "NS";
+        assetByIsin.set(key, {
+          symbol: row.symbol,
+          name: row.symbol, // placeholder — overwritten by Yahoo Finance lookup below
+          categoryId: row.isin === GOLD_ETF_ISIN ? refs.goldId : refs.indianEquityId,
+          tickerSymbol: `${row.symbol}.${suffix}`,
+          exchange: row.exchange,
         });
       }
     }
@@ -192,7 +153,7 @@ async function run(): Promise<void> {
     console.log(`Fetching company names for ${assetByIsin.size} unique assets from Yahoo Finance...`);
     let fetched = 0;
     let fallbackCount = 0;
-    for (const [isin, asset] of assetByIsin) {
+    for (const [, asset] of assetByIsin) {
       const companyName = await fetchCompanyName(asset.tickerSymbol, asset.symbol);
       if (companyName === asset.symbol) fallbackCount++;
       asset.name = companyName;
@@ -207,9 +168,9 @@ async function run(): Promise<void> {
     await client.query("BEGIN");
 
     // Insert assets — ON CONFLICT (name) DO UPDATE handles re-runs
-    const isinToStagingId = new Map<string, number>();
+    const keyToStagingId = new Map<string, number>();
 
-    for (const [isin, asset] of assetByIsin) {
+    for (const [key, asset] of assetByIsin) {
       const result = await client.query<{ id: number }>(
         `INSERT INTO asset_stage (name, investment_category_id, ticker_symbol, exchange, price_source, currency_id)
          VALUES ($1, $2, $3, $4, $5, $6)
@@ -229,12 +190,16 @@ async function run(): Promise<void> {
           refs.inrCurrencyId,
         ],
       );
-      isinToStagingId.set(isin, result.rows[0].id);
+      keyToStagingId.set(key, result.rows[0].id);
     }
 
-    // Insert transactions using asset_stage.id as asset_id
-    for (const order of orders) {
-      const assetStagingId = isinToStagingId.get(order.isin)!;
+    // Insert one transaction row per CSV trade row — no aggregation
+    for (const row of allRows) {
+      const assetStagingId = keyToStagingId.get(assetKey(row))!;
+      const qty = new Decimal(row.quantity);
+      const price = new Decimal(row.price);
+      const amount = qty.times(price);
+
       await client.query(
         `INSERT INTO investment_transaction_stage
            (asset_id, person_id, financial_institution_id, type,
@@ -244,13 +209,13 @@ async function run(): Promise<void> {
           assetStagingId,
           refs.primaryPersonId,
           refs.zerodhFinInstId,
-          order.type,
-          order.totalQty.toFixed(8),
-          order.weightedPrice.toFixed(4),
-          order.totalAmount.toFixed(4),
+          row.trade_type,
+          qty.toFixed(8),
+          price.toFixed(4),
+          amount.toFixed(4),
           refs.inrCurrencyId,
-          order.transactedAt,
-          order.totalAmount.toFixed(4), // INR asset — amount_inr = amount
+          row.trade_date,        // YYYY-MM-DD — use trade_date directly
+          amount.toFixed(4),     // INR asset — amount_inr = amount
         ],
       );
     }
@@ -258,7 +223,7 @@ async function run(): Promise<void> {
     await client.query("COMMIT");
 
     console.log(`Inserted/updated ${assetByIsin.size} asset(s) in asset_stage`);
-    console.log(`Inserted ${orders.length} transaction(s) in investment_transaction_stage`);
+    console.log(`Inserted ${allRows.length} transaction(s) in investment_transaction_stage`);
     console.log("Done.");
   } catch (err) {
     await client.query("ROLLBACK");
