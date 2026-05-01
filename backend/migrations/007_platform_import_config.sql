@@ -1,46 +1,46 @@
 -- Up Migration
 -- Adds staging tables for the seed-then-promote workflow (Phase 3a).
--- Staging tables mirror the production schema exactly (same column names/types),
--- with two differences: no FK constraints, and enums stored as TEXT.
+-- Staging tables mirror the production schema exactly (same column names/types/FKs),
+-- with enums stored as TEXT. FK constraints enable CloudBeaver to show dropdowns
+-- and allow cell-level editing when reviewing/correcting staged data.
 --
 -- asset_stage.id values are staging-only PKs; promote-seed.ts uses them to
 -- join investment_transaction_stage → asset_stage, then remaps to real asset.id
 -- after upserting into production.
 --
--- Idempotency: TRUNCATE all three staging tables before re-running parsers.
--- Use ON CONFLICT (name) DO UPDATE on asset_stage within a single parser run
--- to handle the same asset appearing across multiple files.
+-- Idempotency: TRUNCATE asset_stage CASCADE (cascades to investment_transaction_stage
+-- and holding_stage). Run all parsers in sequence after truncating.
 --
 -- Adds platform_import_config (permanent) for per-platform parser metadata.
 -- All three staging tables are dropped by promote-seed.ts after approval.
 
--- asset_stage mirrors asset exactly (no FK constraints, price_source as TEXT):
+-- asset_stage mirrors asset exactly (enums stored as TEXT):
 CREATE TABLE asset_stage (
   id                     SERIAL PRIMARY KEY,
   name                   TEXT   NOT NULL,
-  investment_category_id INT    NOT NULL,
+  investment_category_id INT    NOT NULL REFERENCES investment_category(id),
   ticker_symbol          TEXT,
   exchange               TEXT,
   price_source           TEXT,
-  currency_id            INT    NOT NULL,
+  currency_id            INT    NOT NULL REFERENCES currency(id),
   subcategory            TEXT,
   UNIQUE (name)
 );
 
 -- investment_transaction_stage mirrors investment_transaction exactly
--- (no FK constraints, enums as TEXT, amount_inr defaults to 0 for USD rows —
+-- (enums stored as TEXT, amount_inr defaults to 0 for USD rows —
 -- backfilled by seed-amount-inr.ts after promotion):
 CREATE TABLE investment_transaction_stage (
   id                       SERIAL        PRIMARY KEY,
-  asset_id                 INT           NOT NULL,
-  person_id                INT           NOT NULL,
-  financial_institution_id INT           NOT NULL,
+  asset_id                 INT           NOT NULL REFERENCES asset_stage(id),
+  person_id                INT           NOT NULL REFERENCES person(id),
+  financial_institution_id INT           NOT NULL REFERENCES financial_institution(id),
   investment_statement_id  INT,
   type                     TEXT          NOT NULL,
   quantity                 NUMERIC(18,8) NOT NULL,
   price                    NUMERIC(18,4) NOT NULL,
   amount                   NUMERIC(18,4) NOT NULL,
-  currency_id              INT           NOT NULL,
+  currency_id              INT           NOT NULL REFERENCES currency(id),
   transacted_at            DATE          NOT NULL,
   status                   TEXT          NOT NULL DEFAULT 'confirmed',
   is_seed                  BOOLEAN       NOT NULL DEFAULT TRUE,
@@ -55,7 +55,7 @@ CREATE TABLE investment_transaction_stage (
 -- so Arjun can verify net positions in CloudBeaver first.
 CREATE TABLE holding_stage (
   id                    SERIAL        PRIMARY KEY,
-  asset_id              INT           NOT NULL,
+  asset_id              INT           NOT NULL REFERENCES asset_stage(id),
   quantity              NUMERIC(18,8) NOT NULL DEFAULT 0,
   avg_cost              NUMERIC(18,4) NOT NULL DEFAULT 0,
   total_invested        NUMERIC(18,4) NOT NULL DEFAULT 0,
