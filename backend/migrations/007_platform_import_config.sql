@@ -1,53 +1,73 @@
 -- Up Migration
 -- Adds staging tables for the seed-then-promote workflow (Phase 3a).
--- Adds platform_import_config for storing parser metadata (reused in Phase 4+ imports).
--- Staging tables have no FK constraints — safe to inspect and re-run parsers against.
--- asset_stage and investment_transaction_stage are dropped by promote-seed.ts after approval.
+-- Staging tables mirror the production schema exactly (same column names/types),
+-- with two differences: no FK constraints, and enums stored as TEXT.
+--
+-- asset_stage.id values are staging-only PKs; promote-seed.ts uses them to
+-- join investment_transaction_stage → asset_stage, then remaps to real asset.id
+-- after upserting into production.
+--
+-- Idempotency: TRUNCATE all three staging tables before re-running parsers.
+-- Use ON CONFLICT (name) DO UPDATE on asset_stage within a single parser run
+-- to handle the same asset appearing across multiple files.
+--
+-- Adds platform_import_config (permanent) for per-platform parser metadata.
+-- All three staging tables are dropped by promote-seed.ts after approval.
 
+-- asset_stage mirrors asset exactly (no FK constraints, price_source as TEXT):
 CREATE TABLE asset_stage (
-  id            SERIAL        PRIMARY KEY,
-  name          TEXT          NOT NULL,
-  category_name TEXT          NOT NULL,
-  ticker_symbol TEXT,
-  subcategory   TEXT,
-  price_source  TEXT,
-  currency_code VARCHAR(3)    NOT NULL,
-  platform      TEXT          NOT NULL,
-  created_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-  UNIQUE (platform, name)
+  id                     SERIAL PRIMARY KEY,
+  name                   TEXT   NOT NULL,
+  investment_category_id INT    NOT NULL,
+  ticker_symbol          TEXT,
+  exchange               TEXT,
+  price_source           TEXT,
+  currency_id            INT    NOT NULL,
+  subcategory            TEXT,
+  UNIQUE (name)
 );
 
+-- investment_transaction_stage mirrors investment_transaction exactly
+-- (no FK constraints, enums as TEXT, amount_inr defaults to 0 for USD rows —
+-- backfilled by seed-amount-inr.ts after promotion):
 CREATE TABLE investment_transaction_stage (
-  id               SERIAL        PRIMARY KEY,
-  asset_key        TEXT          NOT NULL,
-  person_name      TEXT          NOT NULL,
-  institution_name TEXT          NOT NULL,
-  type             TEXT          NOT NULL,
-  quantity         NUMERIC(18,8) NOT NULL,
-  price            NUMERIC(18,4) NOT NULL,
-  amount           NUMERIC(18,4) NOT NULL,
-  currency_code    VARCHAR(3)    NOT NULL,
-  transacted_at    DATE          NOT NULL,
-  platform         TEXT          NOT NULL,
-  raw_ref          TEXT,
-  notes            TEXT,
-  created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+  id                       SERIAL        PRIMARY KEY,
+  asset_id                 INT           NOT NULL,
+  person_id                INT           NOT NULL,
+  financial_institution_id INT           NOT NULL,
+  investment_statement_id  INT,
+  type                     TEXT          NOT NULL,
+  quantity                 NUMERIC(18,8) NOT NULL,
+  price                    NUMERIC(18,4) NOT NULL,
+  amount                   NUMERIC(18,4) NOT NULL,
+  currency_id              INT           NOT NULL,
+  transacted_at            DATE          NOT NULL,
+  status                   TEXT          NOT NULL DEFAULT 'confirmed',
+  is_seed                  BOOLEAN       NOT NULL DEFAULT TRUE,
+  source                   TEXT          NOT NULL DEFAULT 'seeded',
+  notes                    TEXT,
+  created_at               TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  amount_inr               NUMERIC(18,4) NOT NULL DEFAULT 0
 );
 
--- Derived staging table: net positions as they would appear after promotion.
--- Computed from investment_transaction_stage by promote-seed.ts (dry-run step)
--- before the actual transaction commits. Allows Arjun to verify quantities/costs
--- are correct before any production rows are touched.
+-- holding_stage mirrors holding exactly (including native columns from migration 006):
+-- Populated by promote-seed.ts dry-run before the real promotion commits,
+-- so Arjun can verify net positions in CloudBeaver first.
 CREATE TABLE holding_stage (
-  id             SERIAL        PRIMARY KEY,
-  asset_key      TEXT          NOT NULL,
-  category_name  TEXT          NOT NULL,
-  currency_code  VARCHAR(3)    NOT NULL,
-  quantity       NUMERIC(18,8) NOT NULL,
-  avg_cost       NUMERIC(18,4) NOT NULL,
-  total_invested NUMERIC(18,4) NOT NULL,
-  created_at     TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-  UNIQUE (asset_key)
+  id                    SERIAL        PRIMARY KEY,
+  asset_id              INT           NOT NULL,
+  quantity              NUMERIC(18,8) NOT NULL DEFAULT 0,
+  avg_cost              NUMERIC(18,4) NOT NULL DEFAULT 0,
+  total_invested        NUMERIC(18,4) NOT NULL DEFAULT 0,
+  current_price         NUMERIC(18,4),
+  current_value         NUMERIC(18,4),
+  updated_at            TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+  native_currency       VARCHAR(3),
+  native_avg_cost       NUMERIC(18,4),
+  native_total_invested NUMERIC(18,4),
+  current_price_native  NUMERIC(18,4),
+  current_value_native  NUMERIC(18,4),
+  UNIQUE (asset_id)
 );
 
 CREATE TABLE platform_import_config (
