@@ -132,7 +132,12 @@ async function run(): Promise<void> {
       for (const [id, price] of prices) {
         if (!price) { skipped++; continue; }
         await client.query(
-          `UPDATE holding_stage SET current_price = $1, current_value = $1::numeric * quantity WHERE asset_id = $2`,
+          `UPDATE holding_stage SET
+             current_price        = $1,
+             current_value        = $1::numeric * quantity,
+             current_price_native = $1,
+             current_value_native = $1::numeric * quantity
+           WHERE asset_id = $2`,
           [price.toFixed(4), id],
         );
         updated++;
@@ -176,7 +181,12 @@ async function run(): Promise<void> {
         } else {
           for (const a of goldAssets) {
             await client.query(
-              `UPDATE holding_stage SET current_price = $1, current_value = $1::numeric * quantity WHERE asset_id = $2`,
+              `UPDATE holding_stage SET
+                 current_price        = $1,
+                 current_value        = $1::numeric * quantity,
+                 current_price_native = $1,
+                 current_value_native = $1::numeric * quantity
+               WHERE asset_id = $2`,
               [goldPrice.toFixed(4), a.id],
             );
             updated++;

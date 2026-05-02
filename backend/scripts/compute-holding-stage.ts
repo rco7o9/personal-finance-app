@@ -40,8 +40,8 @@ type HoldingResult = {
   qty: Decimal;
   totalInvestedInr: Decimal;
   avgCostInr: Decimal;
-  nativeTotalInvested: Decimal | null; // null for INR assets
-  nativeAvgCost: Decimal | null;       // null for INR assets
+  nativeTotalInvested: Decimal; // INR assets: same as totalInvestedInr; USD assets: USD amount
+  nativeAvgCost: Decimal;       // INR assets: same as avgCostInr; USD assets: USD amount
 };
 
 function computeHolding(txs: TxRow[]): HoldingResult {
@@ -81,8 +81,9 @@ function computeHolding(txs: TxRow[]): HoldingResult {
   }
 
   const avgCostInr = runningQty.gt(0) ? runningCostInr.div(runningQty) : new Decimal(0);
-  const nativeAvgCost =
-    isNonInr && runningQty.gt(0) ? runningCostNative.div(runningQty) : null;
+  // For INR assets, runningCostNative === runningCostInr (amount === amount_inr).
+  // Always populate native columns so holding_stage has no NULLs in the cost columns.
+  const nativeAvgCost = runningQty.gt(0) ? runningCostNative.div(runningQty) : new Decimal(0);
 
   return {
     asset_id: txs[0].asset_id,
@@ -92,7 +93,7 @@ function computeHolding(txs: TxRow[]): HoldingResult {
     qty: runningQty,
     totalInvestedInr: runningCostInr,
     avgCostInr,
-    nativeTotalInvested: isNonInr ? runningCostNative : null,
+    nativeTotalInvested: runningCostNative,
     nativeAvgCost,
   };
 }
@@ -152,9 +153,9 @@ async function run(): Promise<void> {
           h.qty.toFixed(8),
           h.avgCostInr.toFixed(4),
           h.totalInvestedInr.toFixed(4),
-          h.currency_code !== "INR" ? h.currency_code : null,
-          h.nativeAvgCost?.toFixed(4) ?? null,
-          h.nativeTotalInvested?.toFixed(4) ?? null,
+          h.currency_code,
+          h.nativeAvgCost.toFixed(4),
+          h.nativeTotalInvested.toFixed(4),
         ],
       );
     }
