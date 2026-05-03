@@ -1,6 +1,6 @@
 # System Documentation — Personal Finance Tracker
 
-> Last updated: 2026-04-25 (session 9 — Native-currency display for US equity holdings; ADR-018)
+> Last updated: 2026-05-03 (session 11 — Paytm Money seeded; per-platform XIRR; refresh script FX fix)
 > Update this file at the end of every session via `/end-session` after verifying changes.
 
 ---
@@ -26,7 +26,8 @@ security boundary.
 | 2a — Portfolio view   | ✅ Done   | Portfolio overview, allocation vs target, live prices (47/56 holdings; 9 illiquid/SGB have no free API) |
 | 2b — XIRR             | ✅ Done   | XIRR per portfolio, asset class, lot. All 56 holdings priced. XIRR code correct; values meaningless until real transaction dates entered (all seeded as 2026-04-01). |
 | 2c — Native currency  | ✅ Done   | US equity holdings show USD price/value alongside INR. Native avg cost and total invested from original USD transaction amounts. See ADR-018. |
-| 3 — Statement ingestion | Pending | Upload PDF/CSV → Claude AI parse → HITL review → commit |
+| 3a — Investment seed    | 🟡 In progress | Seed real historical transactions from 5 platforms into staging tables. Zerodha ✅, IndMoney ✅, CoinSwitch ✅, PayTM Money ✅, Employer stock 🔜 |
+| 3b — Statement ingestion | Pending | Upload PDF/CSV → Claude AI parse → HITL review → commit |
 | 4 — Expense reporting | Pending   | Monthly + YTD views, budget vs actual, per-person attribution |
 | 5 — Investment reporting | Pending | Monthly invested by asset class, deficit/surplus tracker |
 | 6 — Intelligence layer | Pending  | Projections, rebalancing suggestions, agentic insights |

@@ -26,6 +26,7 @@
     "seed:native-columns": "ts-node --project tsconfig.scripts.json scripts/seed-native-columns.ts"
   },
   "dependencies": {
+    "@google/genai": "^1.51.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.3",
     "@nestjs/core": "^11.0.1",
