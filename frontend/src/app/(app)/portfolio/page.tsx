@@ -3,7 +3,7 @@ import {
   formatCurrency,
   formatCurrencyShort,
   formatDate,
-  formatDelta,
+  formatMonth,
   formatPercent,
 } from "@/lib/formatters";
 import { PortfolioSummary } from "@/types";
@@ -43,9 +43,18 @@ export default async function PortfolioPage() {
       <div className="grid grid-cols-5 gap-4">
         {/* Allocation bars */}
         <div className="col-span-2 rounded-lg border p-6">
-          <p className="text-muted-foreground mb-4 text-xs tracking-wide uppercase">
+          <p className="text-muted-foreground mb-1 text-xs tracking-wide uppercase">
             Actual vs target allocation <span className="normal-case">(| = target)</span>
           </p>
+          {summary.targetEndDate && (
+            <p className="text-muted-foreground mb-4 text-xs">
+              Expected{" "}
+              <span className="text-foreground font-medium">
+                {formatCurrencyShort(summary.expectedTotalValue)}
+              </span>{" "}
+              by {formatMonth(summary.targetEndDate)}
+            </p>
+          )}
           <div className="space-y-3">
             {summary.byAssetClass.map((row) => (
               <div key={row.assetClass}>
@@ -76,12 +85,8 @@ export default async function PortfolioPage() {
                 </div>
                 <div className="text-muted-foreground mt-0.5 flex justify-between text-xs">
                   <span>{formatCurrencyShort(row.value)}</span>
-                  {row.delta && (
-                    <span
-                      className={parseFloat(row.delta) >= 0 ? "text-green-400" : "text-red-400"}
-                    >
-                      {formatDelta(row.delta)}
-                    </span>
+                  {row.targetAbsoluteValue && (
+                    <span>→ {formatCurrencyShort(row.targetAbsoluteValue)}</span>
                   )}
                 </div>
               </div>
@@ -132,7 +137,16 @@ export default async function PortfolioPage() {
                 >
                   {s.tag}
                 </Badge>
-                <p className="text-sm">{s.message}</p>
+                <div>
+                  <p className="text-sm">{s.message}</p>
+                  {s.rupeesGap && (
+                    <p className="text-muted-foreground mt-0.5 text-xs">
+                      {s.tag === "underweight"
+                        ? `${formatCurrencyShort(s.rupeesGap)} needed to reach target`
+                        : `${formatCurrencyShort(Math.abs(parseFloat(s.rupeesGap)))} over target`}
+                    </p>
+                  )}
+                </div>
               </div>
             ))}
           </div>
