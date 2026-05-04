@@ -1,5 +1,5 @@
 import { Injectable, Inject } from "@nestjs/common";
-import { Pool } from "pg";
+import { Pool, PoolClient } from "pg";
 import Decimal from "decimal.js";
 import {
   AssetPriceService,
@@ -26,6 +26,7 @@ type AllocationTargetRow = {
   category_id: number;
   category_name: string;
   target_percentage: string;
+  end_date: Date;
 };
 
 type HoldingRow = {
@@ -69,6 +70,13 @@ type XirrFlowRow = {
   category_id: number;
 };
 
+type TxnRow = {
+  type: string;
+  quantity: string;
+  amount: string;
+  amount_inr: string;
+};
+
 const SUGGESTION_THRESHOLD = new Decimal("3");
 const REFRESH_SLEEP_MS = 1000;
 
@@ -82,20 +90,24 @@ export class PortfolioService {
   ) {}
 
   async getSummary() {
-    const [positions, targets, flows] = await Promise.all([
+    const [positions, targets, flows, plannedInvestments] = await Promise.all([
       this.queryPositions(),
       this.queryTargets(),
       this.queryXirrFlows(),
+      this.queryPlannedInvestments(),
     ]);
 
     const targetMap = new Map(targets.map((t) => [t.category_id, t]));
+    const endDate = targets.length > 0 ? targets[0].end_date : null;
 
     const totalValue = positions.reduce(
       (sum, p) => (p.current_value ? sum.add(new Decimal(p.current_value)) : sum),
       new Decimal(0),
     );
 
-    const byAssetClass = this.groupByAssetClass(positions, totalValue, targetMap);
+    const expectedTotal = totalValue.add(plannedInvestments);
+
+    const byAssetClass = this.groupByAssetClass(positions, expectedTotal, targetMap);
     const byPlatform = this.groupByPlatform(positions);
 
     const today = new Date();
@@ -113,17 +125,24 @@ export class PortfolioService {
       .filter((c) => c.delta !== null && new Decimal(c.delta).abs().gt(SUGGESTION_THRESHOLD))
       .map((c) => {
         const delta = new Decimal(c.delta!);
+        const rupeesGap = c.targetAbsoluteValue
+          ? new Decimal(c.targetAbsoluteValue).sub(new Decimal(c.value))
+          : null;
         return {
           tag: delta.gt(0) ? "overweight" : "underweight",
           assetClass: c.assetClass,
           actualPct: c.percentage,
           targetPct: c.targetPercentage!,
           message: `${c.assetClass} is ${delta.abs().toFixed(2)}% ${delta.gt(0) ? "above" : "below"} target`,
+          rupeesGap: rupeesGap ? rupeesGap.toFixed(2) : null,
         };
       });
 
     return {
       totalValue: totalValue.toFixed(2),
+      expectedTotalValue: expectedTotal.toFixed(2),
+      plannedInvestments: plannedInvestments.toFixed(2),
+      targetEndDate: endDate ? (endDate as unknown as Date).toISOString().slice(0, 10) : null,
       overallXirr,
       byAssetClass: byAssetClassWithXirr,
       byPlatform,
@@ -254,10 +273,14 @@ export class PortfolioService {
   }
 
   async refreshHoldingPrices(): Promise<{ updated: number; skipped: number }> {
+    await this.computeHolding();
+
     type AssetRow = { id: number; ticker_symbol: string | null; price_source: string | null };
     const assets = await this.pool.query<AssetRow>(
-      `SELECT id, ticker_symbol, price_source::text FROM asset
-       WHERE price_source IS NOT NULL AND price_source != 'manual'`,
+      `SELECT a.id, a.ticker_symbol, a.price_source::text
+       FROM asset a
+       JOIN holding h ON h.asset_id = a.id
+       WHERE a.price_source IS NOT NULL AND a.price_source != 'manual'`,
     );
 
     const indianYahooAssets: AssetPriceRow[] = [];
@@ -307,7 +330,13 @@ export class PortfolioService {
           return;
         }
         await this.pool.query(
-          `UPDATE holding SET current_price = $1, current_value = $1::numeric * quantity WHERE asset_id = $2`,
+          `UPDATE holding SET
+             current_price        = $1,
+             current_value        = $1::numeric * quantity,
+             current_price_native = $1,
+             current_value_native = $1::numeric * quantity,
+             updated_at           = NOW()
+           WHERE asset_id = $2`,
           [price.toFixed(4), id],
         );
         updated++;
@@ -327,7 +356,8 @@ export class PortfolioService {
              current_value        = $1::numeric * quantity,
              current_price_native = $2,
              current_value_native = $2::numeric * quantity,
-             native_currency      = 'USD'
+             native_currency      = 'USD',
+             updated_at           = NOW()
            WHERE asset_id = $3`,
           [result.priceInr.toFixed(4), result.priceUsd.toFixed(4), id],
         );
@@ -339,6 +369,83 @@ export class PortfolioService {
   }
 
   // ── private helpers ──────────────────────────────────────────────────────
+
+  private async computeHolding(): Promise<void> {
+    const client: PoolClient = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM holding");
+
+      const { rows: assets } = await client.query<{ asset_id: number; currency_code: string }>(
+        `SELECT DISTINCT it.asset_id, c.code AS currency_code
+         FROM investment_transaction it
+         JOIN asset    a ON a.id = it.asset_id
+         JOIN currency c ON c.id = a.currency_id
+         WHERE it.status = 'confirmed'`,
+      );
+
+      for (const { asset_id, currency_code } of assets) {
+        const { rows: txns } = await client.query<TxnRow>(
+          `SELECT type, quantity, amount, amount_inr
+           FROM investment_transaction
+           WHERE asset_id = $1 AND status = 'confirmed'
+           ORDER BY transacted_at ASC, id ASC`,
+          [asset_id],
+        );
+
+        let runningQty = new Decimal(0);
+        let runningCostInr = new Decimal(0);
+        let runningCostNative = new Decimal(0);
+
+        for (const txn of txns) {
+          const qty = new Decimal(txn.quantity);
+          const inr = new Decimal(txn.amount_inr);
+          const native = new Decimal(txn.amount);
+
+          if (txn.type === "buy") {
+            runningQty = runningQty.plus(qty);
+            runningCostInr = runningCostInr.plus(inr);
+            runningCostNative = runningCostNative.plus(native);
+          } else {
+            const fractionRemaining = runningQty.minus(qty).div(runningQty);
+            runningCostInr = runningCostInr.mul(fractionRemaining);
+            runningCostNative = runningCostNative.mul(fractionRemaining);
+            runningQty = runningQty.minus(qty);
+            if (runningQty.lte(0)) {
+              runningQty = new Decimal(0);
+              runningCostInr = new Decimal(0);
+              runningCostNative = new Decimal(0);
+            }
+          }
+        }
+
+        if (runningQty.lte(0)) continue;
+
+        await client.query(
+          `INSERT INTO holding
+             (asset_id, quantity, avg_cost, total_invested,
+              native_currency, native_avg_cost, native_total_invested)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            asset_id,
+            runningQty.toFixed(8),
+            runningCostInr.div(runningQty).toFixed(4),
+            runningCostInr.toFixed(4),
+            currency_code,
+            runningCostNative.div(runningQty).toFixed(4),
+            runningCostNative.toFixed(4),
+          ],
+        );
+      }
+
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
 
   private async queryPositions(): Promise<PositionRow[]> {
     const result = await this.pool.query<PositionRow>(
@@ -370,7 +477,7 @@ export class PortfolioService {
   private async queryTargets(): Promise<AllocationTargetRow[]> {
     const result = await this.pool.query<AllocationTargetRow>(
       `SELECT ic.id AS category_id, ic.name AS category_name,
-              pat.target_percentage::text
+              pat.target_percentage::text, pat.end_date
        FROM portfolio_allocation_target pat
        JOIN investment_category ic ON ic.id = pat.investment_category_id
        WHERE pat.start_date <= CURRENT_DATE AND pat.end_date >= CURRENT_DATE`,
@@ -378,9 +485,29 @@ export class PortfolioService {
     return result.rows;
   }
 
+  private async queryPlannedInvestments(): Promise<Decimal> {
+    // TODO: currently only sums FUTURE baseline rows (month > today).
+    // Revisit when actual month-by-month investment tracking is in place:
+    // past months in the target period should use actual invested amounts from
+    // investment_transaction, not the baseline estimate. Future months keep using
+    // investment_baseline. Combined, this gives a more accurate expected total.
+    const result = await this.pool.query<{ total: string }>(
+      `SELECT COALESCE(SUM(ib.amount), 0)::text AS total
+       FROM investment_baseline ib
+       WHERE ib.month > CURRENT_DATE
+         AND ib.month <= COALESCE(
+           (SELECT MAX(pat.end_date)
+            FROM portfolio_allocation_target pat
+            WHERE pat.start_date <= CURRENT_DATE AND pat.end_date >= CURRENT_DATE),
+           CURRENT_DATE
+         )`,
+    );
+    return new Decimal(result.rows[0].total);
+  }
+
   private groupByAssetClass(
     positions: PositionRow[],
-    totalValue: Decimal,
+    expectedTotal: Decimal,
     targetMap: Map<number, AllocationTargetRow>,
   ) {
     const map = new Map<number, { categoryName: string; value: Decimal }>();
@@ -397,10 +524,13 @@ export class PortfolioService {
     }
 
     return [...map.entries()].map(([categoryId, { categoryName, value }]) => {
-      const pct = totalValue.gt(0) ? value.div(totalValue).mul(100) : new Decimal(0);
+      // percentage and delta are computed against expectedTotal so the bar shows
+      // current allocation vs where you need to be at end_date
+      const pct = expectedTotal.gt(0) ? value.div(expectedTotal).mul(100) : new Decimal(0);
       const target = targetMap.get(categoryId);
       const targetPct = target ? new Decimal(target.target_percentage) : null;
       const delta = targetPct ? pct.sub(targetPct) : null;
+      const targetAbsoluteValue = targetPct ? targetPct.div(100).mul(expectedTotal) : null;
 
       return {
         categoryId,
@@ -408,6 +538,7 @@ export class PortfolioService {
         value: value.toFixed(2),
         percentage: pct.toFixed(2),
         targetPercentage: targetPct ? targetPct.toFixed(2) : null,
+        targetAbsoluteValue: targetAbsoluteValue ? targetAbsoluteValue.toFixed(2) : null,
         delta: delta ? delta.toFixed(2) : null,
         xirr: null,
       };

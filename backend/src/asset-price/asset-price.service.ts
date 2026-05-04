@@ -4,6 +4,12 @@ import { CurrencyService } from "./currency.service";
 
 export type PriceSource = "yahoo_finance" | "amfi" | "coinmarketcap" | "gold_api" | "manual" | null;
 
+const COINGECKO_ID: Record<string, string> = {
+  "BTC-INR": "bitcoin",
+  "ETH-INR": "ethereum",
+  "SOL-INR": "solana",
+};
+
 export type AssetPriceRow = {
   id: number;
   ticker_symbol: string | null;
@@ -238,13 +244,14 @@ export class AssetPriceService {
     return new Decimal(data.data[0].nav);
   }
 
-  private async fetchCoinGecko(coinId: string): Promise<Decimal | null> {
-    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=inr`;
+  private async fetchCoinGecko(tickerSymbol: string): Promise<Decimal | null> {
+    const geckoId = COINGECKO_ID[tickerSymbol] ?? tickerSymbol;
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${geckoId}&vs_currencies=inr`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`CoinGecko HTTP ${res.status}`);
 
     const data = (await res.json()) as Record<string, { inr: number }>;
-    const inrPrice = data[coinId]?.inr;
+    const inrPrice = data[geckoId]?.inr;
     if (!inrPrice) return null;
 
     return new Decimal(inrPrice);

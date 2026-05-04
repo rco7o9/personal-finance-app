@@ -14,6 +14,9 @@ export type ExpensePriority = "necessary" | "fixed" | "variable";
 
 export type PortfolioSummary = {
   totalValue: string;
+  expectedTotalValue: string;
+  plannedInvestments: string;
+  targetEndDate: string | null;
   overallXirr: string | null;
   byAssetClass: AssetClassSummary[];
   byPlatform: PlatformSummary[];
@@ -24,8 +27,9 @@ export type AssetClassSummary = {
   categoryId: number;
   assetClass: string;
   value: string;
-  percentage: string;
+  percentage: string; // current_value / expectedTotal — compares to target at end_date
   targetPercentage: string | null;
+  targetAbsoluteValue: string | null; // targetPct × expectedTotal in INR
   delta: string | null;
   xirr: string | null;
 };
@@ -42,6 +46,7 @@ export type RebalancingSuggestion = {
   actualPct: string;
   targetPct: string;
   message: string;
+  rupeesGap: string | null; // targetAbsoluteValue − currentValue; negative means overweight
 };
 
 export type PortfolioAsset = {
