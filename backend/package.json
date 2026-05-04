@@ -22,8 +22,7 @@
     "migrate:down": "node-pg-migrate down --migrations-dir migrations --database-url-var DATABASE_URL",
     "migrate:create": "node-pg-migrate create --migrations-dir migrations",
     "codegen": "pgtyped -c pgtyped.config.json",
-    "seed:amount-inr": "ts-node --project tsconfig.scripts.json scripts/seed-amount-inr.ts",
-    "seed:native-columns": "ts-node --project tsconfig.scripts.json scripts/seed-native-columns.ts"
+    "refresh-holding-prices": "ts-node --project tsconfig.scripts.json scripts/refresh-holding-prices.ts"
   },
   "dependencies": {
     "@google/genai": "^1.51.0",
