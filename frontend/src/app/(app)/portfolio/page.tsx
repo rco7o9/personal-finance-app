@@ -83,11 +83,24 @@ export default async function PortfolioPage() {
                     />
                   )}
                 </div>
-                <div className="text-muted-foreground mt-0.5 flex justify-between text-xs">
-                  <span>{formatCurrencyShort(row.value)}</span>
-                  {row.targetAbsoluteValue && (
-                    <span>→ {formatCurrencyShort(row.targetAbsoluteValue)}</span>
-                  )}
+                <div className="mt-0.5 flex justify-between text-xs">
+                  <span className="text-muted-foreground">
+                    {formatCurrencyShort(row.value)}
+                    {row.targetAbsoluteValue && (
+                      <span> → {formatCurrencyShort(row.targetAbsoluteValue)}</span>
+                    )}
+                  </span>
+                  <span
+                    className={
+                      !row.xirr
+                        ? "text-muted-foreground"
+                        : parseFloat(row.xirr) >= 0
+                          ? "text-[var(--color-positive)]"
+                          : "text-red-500"
+                    }
+                  >
+                    {row.xirr ? formatPercent(parseFloat(row.xirr), 1) : "—"}
+                  </span>
                 </div>
               </div>
             ))}

@@ -49,4 +49,17 @@ describe("xirr", () => {
     expect(rate).not.toBeNull();
     expect(rate!).toBeCloseTo(-0.2, 3);
   });
+
+  it("converges for a deeply negative return that causes seed 0.1 to diverge", () => {
+    // Invest 1000, get back only 100 one year later → XIRR ≈ −90%.
+    // Seed 0.1 causes Newton-Raphson to jump below −1 and diverge on the first step;
+    // seed −0.9 is at the exact solution and converges immediately.
+    const flows: CashFlow[] = [
+      { date: d("2024-01-01"), amount: -1000 },
+      { date: d("2025-01-01"), amount: 100 },
+    ];
+    const rate = xirr(flows);
+    expect(rate).not.toBeNull();
+    expect(rate!).toBeCloseTo(-0.9, 2);
+  });
 });
