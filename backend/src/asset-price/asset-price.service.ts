@@ -1,6 +1,10 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { mkdir, readFile, writeFile } from "fs/promises";
+import { join } from "path";
 import Decimal from "decimal.js";
 import { CurrencyService } from "./currency.service";
+
+const AMFI_DISK_CACHE_PATH = join(process.cwd(), ".cache", "amfi-nav.json");
 
 export type PriceSource = "yahoo_finance" | "amfi" | "coinmarketcap" | "gold_api" | "manual" | null;
 
@@ -21,8 +25,17 @@ export type FinnhubNativeResult = { priceInr: Decimal; priceUsd: Decimal };
 type CacheEntry = { priceInr: Decimal; fetchedAt: Date };
 
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const INDIAN_STOCK_API = "http://65.0.104.9";
+const AMFI_NAV_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours — MF NAVs update once per day
+const AMFI_NAV_URL = "https://portal.amfiindia.com/spages/NAVAll.txt";
 const REFRESH_SLEEP_MS = 1000;
+const YAHOO_FINANCE_BATCH_CONCURRENCY = 5;
+const YAHOO_FINANCE_HEADERS = {
+  Accept: "application/json",
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  Origin: "https://finance.yahoo.com",
+  Referer: "https://finance.yahoo.com/",
+};
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -30,6 +43,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 export class AssetPriceService {
   private readonly logger = new Logger(AssetPriceService.name);
   private readonly cache = new Map<number, CacheEntry>();
+  private amfiNavCache: { navByCode: Map<string, string>; fetchedAt: Date } | null = null;
 
   constructor(private readonly currencyService: CurrencyService) {}
 
@@ -56,9 +70,9 @@ export class AssetPriceService {
   }
 
   /**
-   * Batch-fetches prices for all yahoo_finance assets in one request per provider.
-   * Indian stocks (.NS/.BO) → Indian Stock Market API (single batch call)
-   * US stocks (no suffix) → Finnhub (parallel, already low count ~11)
+   * Batch-fetches prices for all yahoo_finance assets.
+   * Indian stocks (.NS/.BO) → Yahoo Finance v8 chart API (5 concurrent, 1s between batches)
+   * US stocks (no suffix) → Finnhub (sequential with 1s delay)
    * Also populates per-asset cache so subsequent getPriceInr calls are fast.
    */
   async batchFetchYahooFinancePrices(
@@ -88,15 +102,25 @@ export class AssetPriceService {
     assets: AssetPriceRow[],
   ): Promise<Map<number, FinnhubNativeResult | null>> {
     if (assets.length === 0) return new Map();
+
+    const usdToInr = await this.currencyService.getUsdToInr();
     const results: [number, FinnhubNativeResult | null][] = [];
-    for (let i = 0; i < assets.length; i++) {
+    for (let i = 0; i < assets.length; i += YAHOO_FINANCE_BATCH_CONCURRENCY) {
       if (i > 0) await sleep(REFRESH_SLEEP_MS);
-      try {
-        const result = await this.fetchFinnhubWithNative(assets[i].ticker_symbol!);
-        results.push([assets[i].id, result]);
-      } catch {
-        results.push([assets[i].id, null]);
-      }
+      const chunk = assets.slice(i, i + YAHOO_FINANCE_BATCH_CONCURRENCY);
+      const chunkResults = await Promise.all(
+        chunk.map(async (asset): Promise<[number, FinnhubNativeResult | null]> => {
+          try {
+            const priceUsd = await this.fetchYahooFinanceChart(asset.ticker_symbol!);
+            if (!priceUsd) return [asset.id, null];
+            return [asset.id, { priceUsd, priceInr: priceUsd.mul(usdToInr) }];
+          } catch (err) {
+            this.logger.error(`Yahoo Finance fetch failed for ${asset.ticker_symbol}: ${err}`);
+            return [asset.id, null];
+          }
+        }),
+      );
+      results.push(...chunkResults);
     }
     return new Map(results);
   }
@@ -107,57 +131,36 @@ export class AssetPriceService {
     const eligible = assets.filter((a) => a.ticker_symbol);
     if (eligible.length === 0) return new Map();
 
-    // API allows max 10 symbols per request — chunk and fetch in parallel
-    const CHUNK_SIZE = 10;
-    const chunks: AssetPriceRow[][] = [];
-    for (let i = 0; i < eligible.length; i += CHUNK_SIZE) {
-      chunks.push(eligible.slice(i, i + CHUNK_SIZE));
-    }
-
-    const chunkResults: Map<number, Decimal | null>[] = [];
-    for (let i = 0; i < chunks.length; i++) {
+    const results: [number, Decimal | null][] = [];
+    for (let i = 0; i < eligible.length; i += YAHOO_FINANCE_BATCH_CONCURRENCY) {
       if (i > 0) await sleep(REFRESH_SLEEP_MS);
-      chunkResults.push(await this.fetchIndianStockChunk(chunks[i]));
+      const chunk = eligible.slice(i, i + YAHOO_FINANCE_BATCH_CONCURRENCY);
+      const chunkResults = await Promise.all(
+        chunk.map(async (asset): Promise<[number, Decimal | null]> => {
+          try {
+            const price = await this.fetchYahooFinanceChart(asset.ticker_symbol!);
+            return [asset.id, price];
+          } catch (err) {
+            this.logger.error(`Yahoo Finance fetch failed for ${asset.ticker_symbol}: ${err}`);
+            return [asset.id, null];
+          }
+        }),
+      );
+      results.push(...chunkResults);
     }
 
-    return new Map(chunkResults.flatMap((m) => [...m]));
+    return new Map(results);
   }
 
-  private async fetchIndianStockChunk(
-    assets: AssetPriceRow[],
-    retries = 2,
-  ): Promise<Map<number, Decimal | null>> {
-    const symbols = assets.map((a) => a.ticker_symbol!).join(",");
-    const url = `${INDIAN_STOCK_API}/stock/list?symbols=${symbols}&res=num`;
-
-    let stocks: { ticker?: string; last_price?: number }[];
-    try {
-      const res = await fetch(url);
-      // Retry on transient server errors
-      if ((res.status === 503 || res.status === 504) && retries > 0) {
-        await new Promise((r) => setTimeout(r, 1000));
-        return this.fetchIndianStockChunk(assets, retries - 1);
-      }
-      if (!res.ok) throw new Error(`Indian Stock API HTTP ${res.status}`);
-      const data = (await res.json()) as { stocks: { ticker?: string; last_price?: number }[] };
-      stocks = data.stocks ?? [];
-    } catch (err) {
-      this.logger.error(`Batch Indian stock fetch failed: ${err}`);
-      return new Map(assets.map((a) => [a.id, null]));
-    }
-
-    // Build ticker → price map from response (response ticker includes .NS suffix)
-    const priceByTicker = new Map<string, number>();
-    for (const s of stocks) {
-      if (s.ticker && s.last_price) priceByTicker.set(s.ticker.toUpperCase(), s.last_price);
-    }
-
-    return new Map(
-      assets.map((a) => {
-        const price = priceByTicker.get(a.ticker_symbol!.toUpperCase());
-        return [a.id, price ? new Decimal(price) : null];
-      }),
-    );
+  private async fetchYahooFinanceChart(ticker: string): Promise<Decimal | null> {
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d&includePrePost=false`;
+    const res = await fetch(url, { headers: YAHOO_FINANCE_HEADERS });
+    if (!res.ok) throw new Error(`Yahoo Finance HTTP ${res.status}`);
+    const data = (await res.json()) as {
+      chart: { result: Array<{ meta: { regularMarketPrice: number } }> | null; error?: unknown };
+    };
+    const price = data.chart?.result?.[0]?.meta?.regularMarketPrice;
+    return price ? new Decimal(price) : null;
   }
 
   private async batchFetchFinnhub(assets: AssetPriceRow[]): Promise<Map<number, Decimal | null>> {
@@ -196,14 +199,13 @@ export class AssetPriceService {
   private async fetchYahooFinance(ticker: string): Promise<Decimal | null> {
     const isIndian = ticker.endsWith(".NS") || ticker.endsWith(".BO");
     if (isIndian) {
-      const url = `${INDIAN_STOCK_API}/stock?symbol=${ticker}&res=num`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`Indian Stock API HTTP ${res.status}`);
-      const data = (await res.json()) as { data?: { last_price?: number } };
-      const price = data.data?.last_price;
-      return price ? new Decimal(price) : null;
+      return this.fetchYahooFinanceChart(ticker);
     }
-    return this.fetchFinnhub(ticker);
+    // US stocks: Yahoo Finance returns USD price; multiply by live USD/INR
+    const priceUsd = await this.fetchYahooFinanceChart(ticker);
+    if (!priceUsd) return null;
+    const usdToInr = await this.currencyService.getUsdToInr();
+    return priceUsd.mul(usdToInr);
   }
 
   private async fetchFinnhub(ticker: string): Promise<Decimal | null> {
@@ -234,14 +236,60 @@ export class AssetPriceService {
   }
 
   private async fetchAmfi(schemeCode: string): Promise<Decimal | null> {
-    const url = `https://api.mfapi.in/mf/${schemeCode}/latest`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`mfapi HTTP ${res.status}`);
+    if (
+      !this.amfiNavCache ||
+      Date.now() - this.amfiNavCache.fetchedAt.getTime() > AMFI_NAV_TTL_MS
+    ) {
+      await this.loadAmfiNavCache();
+    }
 
-    const data = (await res.json()) as { data: { nav: string }[] };
-    if (!data.data?.[0]?.nav) return null;
+    const nav = this.amfiNavCache!.navByCode.get(schemeCode);
+    return nav ? new Decimal(nav) : null;
+  }
 
-    return new Decimal(data.data[0].nav);
+  private async loadAmfiNavCache(): Promise<void> {
+    // Try disk cache first — survives container restarts via the ./backend volume mount
+    try {
+      const raw = await readFile(AMFI_DISK_CACHE_PATH, "utf-8");
+      const parsed = JSON.parse(raw) as { fetchedAt: string; entries: [string, string][] };
+      const fetchedAt = new Date(parsed.fetchedAt);
+      if (Date.now() - fetchedAt.getTime() < AMFI_NAV_TTL_MS) {
+        this.amfiNavCache = { navByCode: new Map(parsed.entries), fetchedAt };
+        return;
+      }
+    } catch {
+      // No disk cache or stale — fall through to network fetch
+    }
+
+    // Fetch from AMFI
+    const res = await fetch(AMFI_NAV_URL);
+    if (!res.ok) throw new Error(`AMFI HTTP ${res.status}`);
+    const text = await res.text();
+    const navByCode = new Map<string, string>();
+    for (const line of text.split("\n")) {
+      const parts = line.split(";");
+      if (parts.length >= 5 && parts[4].trim()) {
+        navByCode.set(parts[0].trim(), parts[4].trim());
+      }
+    }
+    const fetchedAt = new Date();
+    this.amfiNavCache = { navByCode, fetchedAt };
+
+    // Persist to disk asynchronously (don't await — don't block the caller)
+    void this.writeAmfiNavCache(navByCode, fetchedAt);
+  }
+
+  private async writeAmfiNavCache(navByCode: Map<string, string>, fetchedAt: Date): Promise<void> {
+    try {
+      await mkdir(join(process.cwd(), ".cache"), { recursive: true });
+      await writeFile(
+        AMFI_DISK_CACHE_PATH,
+        JSON.stringify({ fetchedAt: fetchedAt.toISOString(), entries: [...navByCode] }),
+        "utf-8",
+      );
+    } catch (err) {
+      this.logger.warn(`Failed to write AMFI disk cache: ${err}`);
+    }
   }
 
   private async fetchCoinGecko(tickerSymbol: string): Promise<Decimal | null> {
