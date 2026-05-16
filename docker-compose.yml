@@ -17,6 +17,22 @@ services:
       timeout: 5s
       retries: 5
 
+  agents:
+    build:
+      context: ./agents
+      dockerfile: ../Dockerfile.agents.dev
+    container_name: pfa_agents
+    restart: unless-stopped
+    environment:
+      PORT: 3002
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./agents:/app
+      - /app/node_modules
+
   backend:
     build:
       context: ./backend
@@ -31,6 +47,8 @@ services:
       PORT: 3001
       FINNHUB_API_KEY: ${FINNHUB_API_KEY}
       GOLD_API_KEY: ${GOLD_API_KEY}
+      AGENT_SERVICE_URL: http://agents:3002
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
     ports:
       - "3001:3001"
     volumes:

@@ -17,7 +17,10 @@ const INVESTMENT_PLATFORMS = [
   { value: "employer-stock", label: "Employer stock" },
 ];
 
-const EXPENSE_PLATFORMS = [{ value: "hdfc-bank", label: "HDFC Bank" }];
+const EXPENSE_PLATFORMS = [
+  { value: "hdfc-bank", label: "HDFC Bank" },
+  { value: "icici-bank", label: "ICICI Bank" },
+];
 
 const CATEGORY_BADGE: Record<string, string> = {
   "US Equity": "bg-blue-500/20 text-blue-300 border-blue-400/30",
