@@ -209,7 +209,10 @@ export class StatementsService {
         asset_id: number;
       }>(
         `SELECT it.transacted_at::text,
-                ROUND(it.amount, 2)::text AS amount_rounded,
+                ROUND(
+                  COALESCE((it.raw_source->'parsed'->>'amount')::numeric, it.amount),
+                  2
+                )::text AS amount_rounded,
                 it.asset_id
          FROM investment_transaction it
          WHERE it.financial_institution_id = $1
