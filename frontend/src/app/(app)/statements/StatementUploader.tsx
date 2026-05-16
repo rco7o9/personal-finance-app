@@ -129,7 +129,11 @@ export function StatementUploader({ personId, initialPendingRows }: Props) {
   }
 
   async function handleUpload() {
-    if (!selectedFile || !platform) return;
+    if (!selectedFile) return;
+    if (!platform) {
+      setErrorMsg("Please select a platform before uploading.");
+      return;
+    }
     setUploading(true);
     setErrorMsg("");
     try {
@@ -294,7 +298,7 @@ export function StatementUploader({ personId, initialPendingRows }: Props) {
             >
               Remove file
             </button>
-            <Button onClick={() => void handleUpload()} disabled={!platform || uploading}>
+            <Button onClick={() => void handleUpload()} disabled={uploading}>
               {uploading ? "Parsing…" : "Upload & Parse"}
             </Button>
           </div>
