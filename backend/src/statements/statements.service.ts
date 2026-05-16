@@ -267,7 +267,7 @@ export class StatementsService {
           continue;
         }
 
-        const txnType = txn.type === "debit" ? "buy" : "sell";
+        const txnType = txn.type === "debit" ? "sell" : "buy";
         const quantity = txn.quantity ?? 0;
         const price = txn.price ?? 0;
 
