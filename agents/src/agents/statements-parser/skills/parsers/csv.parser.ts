@@ -52,6 +52,33 @@ function parseRows(file: Buffer, skill: SkillTemplate): Record<string, string>[]
   });
 }
 
+const MONTH_ABBR: Record<string, string> = {
+  jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+  jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+};
+
+// Normalises crypto market pair symbols: "BTCINR" → "BTC-INR", "ETHINR" → "ETH-INR"
+function normaliseAssetName(raw: string): string {
+  return raw.replace(/^([A-Z0-9]+)(INR|USDT|ETH|BTC|USDC|BNB|SOL)$/i, (_, base, quote) =>
+    `${base.toUpperCase()}-${quote.toUpperCase()}`
+  );
+}
+
+// Normalises any date string to YYYY-MM-DD.
+// Handles: "08 Apr 2026, 07:53 PM", "2026-04-08", "08-Apr-2026", "DD/MM/YYYY"
+function normaliseDate(raw: string): string {
+  const s = raw.trim();
+  const iso = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  if (iso) return iso[1];
+  const dmy = /^(\d{1,2})[-\s]([A-Za-z]{3})[-\s,]*\s*(\d{4})/.exec(s);
+  if (dmy) {
+    return `${dmy[3]}-${MONTH_ABBR[dmy[2].toLowerCase()] ?? "01"}-${dmy[1].padStart(2, "0")}`;
+  }
+  const slash = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(s);
+  if (slash) return `${slash[3]}-${slash[2]}-${slash[1]}`;
+  return s;
+}
+
 function toNumber(value: string): number {
   // Strip currency symbols, commas, spaces, and trailing text (e.g. " INR", " USD")
   const cleaned = String(value)
@@ -95,6 +122,10 @@ export function parseCsv({ file, skill }: CsvParserInput): ParseResult {
         } else if (txField === "type") {
           const lower = String(rawValue).toLowerCase();
           (tx as Record<string, unknown>)[txField] = lower.includes("sell") ? "debit" : "credit";
+        } else if (txField === "date") {
+          (tx as Record<string, unknown>)[txField] = normaliseDate(String(rawValue));
+        } else if (txField === "assetName") {
+          (tx as Record<string, unknown>)[txField] = normaliseAssetName(String(rawValue));
         } else {
           (tx as Record<string, unknown>)[txField] = String(rawValue);
         }

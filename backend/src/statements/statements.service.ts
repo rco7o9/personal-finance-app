@@ -198,17 +198,20 @@ export class StatementsService {
       }
       const currencyId = currencyRow.rows[0].id;
 
-      // Fetch last 4 months for dedup
+      // Fetch last 4 months for dedup — keyed by (date, ROUND(amount,2), asset_id)
+      // Using asset_id (not asset name) avoids false misses when the same asset has
+      // different display names across data sources (e.g. ticker vs full name).
       const fourMonthsAgo = new Date();
       fourMonthsAgo.setMonth(fourMonthsAgo.getMonth() - 4);
       const dedupRows = await client.query<{
         transacted_at: string;
-        amount: string;
-        asset_name: string;
+        amount_rounded: string;
+        asset_id: number;
       }>(
-        `SELECT it.transacted_at::text, it.amount::text, a.name AS asset_name
+        `SELECT it.transacted_at::text,
+                ROUND(it.amount, 2)::text AS amount_rounded,
+                it.asset_id
          FROM investment_transaction it
-         JOIN asset a ON a.id = it.asset_id
          WHERE it.financial_institution_id = $1
            AND it.person_id = $2
            AND it.transacted_at >= $3`,
@@ -216,7 +219,7 @@ export class StatementsService {
       );
       const existingKeys = new Set(
         dedupRows.rows.map(
-          (r) => `${r.transacted_at.slice(0, 10)}|${r.amount}|${r.asset_name.toLowerCase()}`,
+          (r) => `${r.transacted_at.slice(0, 10)}|${r.amount_rounded}|${r.asset_id}`,
         ),
       );
 
@@ -229,17 +232,19 @@ export class StatementsService {
       for (const txn of transactions) {
         const assetLabel = txn.assetName ?? txn.description;
         const amount = txn.amount;
-        const dedupKey = `${txn.date}|${amount.toFixed(4)}|${assetLabel.toLowerCase()}`;
 
-        if (existingKeys.has(dedupKey)) {
-          skipped++;
-          continue;
-        }
-
-        // Look up or create asset
+        // Look up asset: name first, then ticker_symbol with .NS/.BO suffix variants,
+        // then txn.description (platforms like IndMoney map stock symbol → description).
+        const ticker = txn.description !== assetLabel ? txn.description : "";
         const assetSearch = await client.query<{ id: number }>(
-          "SELECT id FROM asset WHERE lower(name) = lower($1) LIMIT 1",
-          [assetLabel],
+          `SELECT id FROM asset
+           WHERE lower(name) = lower($1)
+              OR lower(ticker_symbol) = lower($1)
+              OR lower(ticker_symbol) = lower($1 || '.NS')
+              OR lower(ticker_symbol) = lower($1 || '.BO')
+              OR ($2 <> '' AND lower(ticker_symbol) = lower($2))
+           LIMIT 1`,
+          [assetLabel, ticker],
         );
         let assetId: number;
         if (assetSearch.rowCount && assetSearch.rowCount > 0) {
@@ -253,6 +258,12 @@ export class StatementsService {
           assetId = newAsset.rows[0].id;
         }
 
+        const dedupKey = `${txn.date}|${amount.toFixed(2)}|${assetId}`;
+        if (existingKeys.has(dedupKey)) {
+          skipped++;
+          continue;
+        }
+
         const txnType = txn.type === "debit" ? "buy" : "sell";
         const quantity = txn.quantity ?? 0;
         const price = txn.price ?? 0;
@@ -260,10 +271,10 @@ export class StatementsService {
         const insertRow = await client.query<{ id: number }>(
           `INSERT INTO investment_transaction
              (asset_id, person_id, financial_institution_id, type, quantity, price,
-              amount, amount_inr, native_currency, currency_id, transacted_at,
+              amount, amount_inr, currency_id, transacted_at,
               status, source, confidence_score, verification_status, raw_source)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-                   'pending', 'imported', $12, $13, $14)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                   'pending', 'imported', $11, $12, $13)
            RETURNING id`,
           [
             assetId,
@@ -274,7 +285,6 @@ export class StatementsService {
             price,
             amount,
             amount, // amount_inr = amount in MVP (no FX conversion)
-            nativeCurrencyCode,
             currencyId,
             txn.date,
             txn.confidence,
@@ -421,7 +431,7 @@ export class StatementsService {
            ic.name                            AS "categoryName",
            it.quantity::text                  AS quantity,
            it.price::text                     AS price,
-           it.native_currency                 AS "nativeCurrency",
+           c.code                             AS "nativeCurrency",
            COALESCE(it.amount_inr, it.amount)::text AS "amountInr",
            it.status::text                    AS status,
            it.confidence_score::text          AS "confidenceScore",
@@ -430,6 +440,7 @@ export class StatementsService {
          JOIN asset a ON a.id = it.asset_id
          JOIN investment_category ic ON ic.id = a.investment_category_id
          JOIN financial_institution fi ON fi.id = it.financial_institution_id
+         JOIN currency c ON c.id = it.currency_id
          WHERE it.person_id = $1
            AND it.status = 'pending'
            AND it.confidence_score IS NOT NULL
@@ -549,7 +560,7 @@ export class StatementsService {
          ic.name                            AS "categoryName",
          it.quantity::text                  AS quantity,
          it.price::text                     AS price,
-         it.native_currency                 AS "nativeCurrency",
+         c.code                             AS "nativeCurrency",
          COALESCE(it.amount_inr, it.amount)::text AS "amountInr",
          it.status::text                    AS status,
          it.confidence_score::text          AS "confidenceScore",
@@ -558,6 +569,7 @@ export class StatementsService {
        JOIN asset a ON a.id = it.asset_id
        JOIN investment_category ic ON ic.id = a.investment_category_id
        JOIN financial_institution fi ON fi.id = it.financial_institution_id
+       JOIN currency c ON c.id = it.currency_id
        WHERE it.id = ANY($1)
        ORDER BY it.transacted_at DESC`,
       [ids],
