@@ -69,6 +69,28 @@ export type LotEntry = {
   xirr: string | null;
 };
 
+export type PendingTransaction = {
+  id: number;
+  date: string;
+  assetName: string;
+  platform: string;
+  categoryName: string;
+  quantity: string | null;
+  price: string | null;
+  nativeCurrency: string | null;
+  amountInr: string;
+  status: "pending" | "confirmed";
+  confidenceScore: string | null;
+  verificationStatus: "passed" | "failed" | "skipped" | null;
+};
+
+export type UploadResponse = {
+  inserted: number;
+  skipped: number;
+  verificationStatus: "passed" | "failed" | "skipped";
+  transactions: PendingTransaction[];
+};
+
 export type AssetDetail = {
   assetName: string;
   currentValue: string | null;
