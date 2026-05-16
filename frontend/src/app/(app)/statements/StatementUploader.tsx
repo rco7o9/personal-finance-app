@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, FileText, Check, Pencil } from "lucide-react";
+import { Upload, FileText, Check, Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -68,13 +68,27 @@ interface LocalRow extends PendingTransaction {
   editAmountInr: string;
 }
 
-type Phase = "idle" | "uploading" | "reviewing" | "error";
+function toLocalRow(t: PendingTransaction): LocalRow {
+  return {
+    ...t,
+    localStatus: "pending",
+    editAssetName: t.assetName,
+    editAmountInr: t.amountInr,
+  };
+}
+
+interface UploadSummary {
+  filename: string;
+  inserted: number;
+  skipped: number;
+}
 
 interface Props {
   personId: number | null;
+  initialPendingRows: PendingTransaction[];
 }
 
-export function StatementUploader({ personId }: Props) {
+export function StatementUploader({ personId, initialPendingRows }: Props) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -82,15 +96,14 @@ export function StatementUploader({ personId }: Props) {
   const [statementType, setStatementType] = useState<"investment" | "expense">("investment");
   const [platform, setPlatform] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [uploading, setUploading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const [filename, setFilename] = useState("");
-  const [totalParsed, setTotalParsed] = useState(0);
-  const [rows, setRows] = useState<LocalRow[]>([]);
+  const [uploadSummary, setUploadSummary] = useState<UploadSummary | null>(null);
+  const [rows, setRows] = useState<LocalRow[]>(() => initialPendingRows.map(toLocalRow));
 
   const platforms = statementType === "investment" ? INVESTMENT_PLATFORMS : EXPENSE_PLATFORMS;
-  const confirmedCount = rows.filter((r) => r.localStatus === "confirmed").length;
   const visibleRows = rows.filter((r) => r.localStatus !== "rejected");
+  const confirmedCount = visibleRows.filter((r) => r.localStatus === "confirmed").length;
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -117,7 +130,7 @@ export function StatementUploader({ personId }: Props) {
 
   async function handleUpload() {
     if (!selectedFile || !platform) return;
-    setPhase("uploading");
+    setUploading(true);
     setErrorMsg("");
     try {
       const ext = selectedFile.name.split(".").pop()?.toLowerCase() ?? "";
@@ -129,20 +142,24 @@ export function StatementUploader({ personId }: Props) {
         JSON.stringify({ type: statementType, platform, format, personId: personId ?? 1 }),
       );
       const result = await apiPostForm<UploadResponse>("/statements/upload", formData);
-      setFilename(selectedFile.name);
-      setTotalParsed(result.inserted + result.skipped);
-      setRows(
-        result.transactions.map((t) => ({
-          ...t,
-          localStatus: t.status === "confirmed" ? "confirmed" : "pending",
-          editAssetName: t.assetName,
-          editAmountInr: t.amountInr,
-        })),
-      );
-      setPhase("reviewing");
+
+      setUploadSummary({
+        filename: selectedFile.name,
+        inserted: result.inserted,
+        skipped: result.skipped,
+      });
+
+      setRows((prev) => {
+        const existingIds = new Set(prev.map((r) => r.id));
+        const newLocal = result.transactions.filter((t) => !existingIds.has(t.id)).map(toLocalRow);
+        return [...newLocal, ...prev];
+      });
+
+      clearFile();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Upload failed");
-      setPhase("error");
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -277,37 +294,32 @@ export function StatementUploader({ personId }: Props) {
             >
               Remove file
             </button>
-            <Button
-              onClick={() => void handleUpload()}
-              disabled={!platform || phase === "uploading"}
-            >
-              {phase === "uploading" ? "Parsing…" : "Upload & Parse"}
+            <Button onClick={() => void handleUpload()} disabled={!platform || uploading}>
+              {uploading ? "Parsing…" : "Upload & Parse"}
             </Button>
           </div>
         )}
 
-        {phase === "error" && <p className="mt-3 text-sm text-red-500">{errorMsg}</p>}
+        {errorMsg && <p className="mt-3 text-sm text-red-500">{errorMsg}</p>}
+
+        {uploadSummary && !selectedFile && (
+          <div className="mt-3 flex items-center gap-2 text-xs">
+            <FileText className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
+            <span className="text-muted-foreground font-medium">{uploadSummary.filename}</span>
+            <span className="text-muted-foreground">·</span>
+            <span className="font-medium text-green-400">+{uploadSummary.inserted} new</span>
+            {uploadSummary.skipped > 0 && (
+              <span className="text-muted-foreground">{uploadSummary.skipped} skipped</span>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Parsed file + HITL review */}
-      {phase === "reviewing" && rows.length > 0 && (
+      {/* Pending review panel */}
+      {visibleRows.length > 0 && (
         <div className="rounded-xl border">
-          {/* File info row */}
-          <div className="flex items-center justify-between border-b px-6 py-3">
-            <div className="flex items-center gap-2">
-              <FileText className="text-muted-foreground h-4 w-4 shrink-0" />
-              <span className="text-sm font-medium">{filename}</span>
-            </div>
-            <span className="rounded-full bg-green-500/15 px-2.5 py-0.5 text-xs font-medium text-green-400">
-              Parsed · {totalParsed} entries
-            </span>
-          </div>
-
-          {/* Review header */}
-          <div className="flex items-center justify-between px-6 py-4">
-            <h3 className="text-sm font-semibold">
-              HITL Review — {statementType === "investment" ? "Investment" : "Expense"} entries
-            </h3>
+          <div className="flex items-center justify-between border-b px-6 py-4">
+            <h3 className="text-sm font-semibold">Pending Review</h3>
             <div className="flex items-center gap-3">
               <span className="text-muted-foreground text-xs">
                 {confirmedCount} of {visibleRows.length} confirmed
@@ -323,8 +335,7 @@ export function StatementUploader({ personId }: Props) {
             </div>
           </div>
 
-          {/* Table */}
-          <div className="px-6 pb-6">
+          <div className="px-6 pt-2 pb-6">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-muted-foreground border-b text-xs">
@@ -352,12 +363,9 @@ export function StatementUploader({ personId }: Props) {
               </tbody>
             </table>
 
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setPhase("idle")}>
-                Review all
-              </Button>
+            <div className="mt-4 flex justify-end">
               <Button size="sm" onClick={handleCommit}>
-                Commit confirmed
+                Done — go to Portfolio
               </Button>
             </div>
           </div>
@@ -401,7 +409,7 @@ function ReviewRow({ row, onConfirm, onReject, onEdit, onSaveEdit }: ReviewRowPr
           />
         </td>
         <td className="py-2 text-right">
-          <div className="flex justify-end gap-1">
+          <div className="flex items-center justify-end gap-1">
             <button
               onClick={() => onSaveEdit(editName, editAmt)}
               className="rounded-lg bg-green-500/20 px-2 py-1 text-xs font-medium text-green-400 transition-colors hover:bg-green-500/30"
@@ -410,9 +418,10 @@ function ReviewRow({ row, onConfirm, onReject, onEdit, onSaveEdit }: ReviewRowPr
             </button>
             <button
               onClick={onReject}
-              className="text-muted-foreground hover:text-foreground rounded-lg px-2 py-1 text-xs transition-colors"
+              className="text-muted-foreground rounded-lg p-1 transition-colors hover:text-red-400"
+              title="Reject"
             >
-              Skip
+              <X className="h-3.5 w-3.5" />
             </button>
           </div>
         </td>
@@ -446,22 +455,33 @@ function ReviewRow({ row, onConfirm, onReject, onEdit, onSaveEdit }: ReviewRowPr
             <Check className="h-3 w-3" />
             Done
           </span>
-        ) : isLowConfidence ? (
-          <button
-            onClick={onEdit}
-            className="inline-flex items-center gap-1 rounded-lg border border-amber-400/50 px-3 py-1 text-xs font-medium text-amber-400 transition-colors hover:bg-amber-400/10"
-          >
-            <Pencil className="h-3 w-3" />
-            Edit
-          </button>
         ) : (
-          <button
-            onClick={onConfirm}
-            className="border-border hover:bg-muted inline-flex items-center gap-1 rounded-lg border px-3 py-1 text-xs font-medium transition-colors"
-          >
-            <Check className="h-3 w-3" />
-            Confirm
-          </button>
+          <div className="flex items-center justify-end gap-1">
+            {isLowConfidence ? (
+              <button
+                onClick={onEdit}
+                className="inline-flex items-center gap-1 rounded-lg border border-amber-400/50 px-3 py-1 text-xs font-medium text-amber-400 transition-colors hover:bg-amber-400/10"
+              >
+                <Pencil className="h-3 w-3" />
+                Edit
+              </button>
+            ) : (
+              <button
+                onClick={onConfirm}
+                className="border-border hover:bg-muted inline-flex items-center gap-1 rounded-lg border px-3 py-1 text-xs font-medium transition-colors"
+              >
+                <Check className="h-3 w-3" />
+                Confirm
+              </button>
+            )}
+            <button
+              onClick={onReject}
+              className="text-muted-foreground rounded-lg p-1 transition-colors hover:text-red-400"
+              title="Reject"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
         )}
       </td>
     </tr>

@@ -1,3 +1,5 @@
+import { apiGet } from "@/lib/api";
+import type { PendingTransaction } from "@/types";
 import { StatementUploader } from "./StatementUploader";
 
 export default async function StatementsPage({
@@ -8,6 +10,10 @@ export default async function StatementsPage({
   const { personId } = await searchParams;
   const pid = personId ? parseInt(personId, 10) : null;
 
+  const pendingRows: PendingTransaction[] = pid
+    ? await apiGet<PendingTransaction[]>(`/statements/pending?personId=${pid}`).catch(() => [])
+    : [];
+
   return (
     <div className="mx-auto max-w-4xl space-y-4">
       <div>
@@ -16,7 +22,7 @@ export default async function StatementsPage({
           Upload a monthly statement to parse and review transactions before confirming.
         </p>
       </div>
-      <StatementUploader personId={pid} />
+      <StatementUploader personId={pid} initialPendingRows={pendingRows} />
     </div>
   );
 }
