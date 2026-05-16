@@ -102,8 +102,11 @@ export function StatementUploader({ personId, initialPendingRows }: Props) {
   const [rows, setRows] = useState<LocalRow[]>(() => initialPendingRows.map(toLocalRow));
 
   const platforms = statementType === "investment" ? INVESTMENT_PLATFORMS : EXPENSE_PLATFORMS;
-  const visibleRows = rows.filter((r) => r.localStatus !== "rejected");
-  const confirmedCount = visibleRows.filter((r) => r.localStatus === "confirmed").length;
+  const visibleRows = rows.filter(
+    (r) => r.localStatus !== "rejected" && r.localStatus !== "confirmed",
+  );
+  const confirmedCount = rows.filter((r) => r.localStatus === "confirmed").length;
+  const totalForProgress = rows.filter((r) => r.localStatus !== "rejected").length;
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -171,7 +174,6 @@ export function StatementUploader({ personId, initialPendingRows }: Props) {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, localStatus: "confirmed" } : r)));
     try {
       await apiPatch(`/statements/${id}`, { action: "confirm" });
-      setRows((prev) => prev.filter((r) => r.id !== id));
     } catch {
       setRows((prev) => prev.map((r) => (r.id === id ? { ...r, localStatus: "pending" } : r)));
     }
@@ -183,7 +185,6 @@ export function StatementUploader({ personId, initialPendingRows }: Props) {
     );
     try {
       await apiPatch(`/statements/${id}`, { action: "edit", assetName, amountInr });
-      setRows((prev) => prev.filter((r) => r.id !== id));
     } catch {
       setRows((prev) => prev.map((r) => (r.id === id ? { ...r, localStatus: "editing" } : r)));
     }
@@ -328,13 +329,13 @@ export function StatementUploader({ personId, initialPendingRows }: Props) {
             <h3 className="text-sm font-semibold">Pending Review</h3>
             <div className="flex items-center gap-3">
               <span className="text-muted-foreground text-xs">
-                {confirmedCount} of {visibleRows.length} confirmed
+                {confirmedCount} of {totalForProgress} confirmed
               </span>
               <div className="bg-muted h-1.5 w-24 overflow-hidden rounded-full">
                 <div
                   className="h-full rounded-full bg-green-500 transition-all duration-300"
                   style={{
-                    width: `${visibleRows.length ? (confirmedCount / visibleRows.length) * 100 : 0}%`,
+                    width: `${totalForProgress ? (confirmedCount / totalForProgress) * 100 : 0}%`,
                   }}
                 />
               </div>
