@@ -160,7 +160,7 @@ export function StatementUploader({ personId }: Props) {
       prev.map((r) => (r.id === id ? { ...r, assetName, amountInr, localStatus: "confirmed" } : r)),
     );
     try {
-      await apiPatch(`/statements/${id}`, { action: "confirm", assetName, amountInr });
+      await apiPatch(`/statements/${id}`, { action: "edit", assetName, amountInr });
     } catch {
       setRows((prev) => prev.map((r) => (r.id === id ? { ...r, localStatus: "editing" } : r)));
     }
@@ -252,7 +252,7 @@ export function StatementUploader({ personId }: Props) {
                 <p className="text-muted-foreground mt-0.5 text-xs">
                   {statementType === "investment"
                     ? "INDMoney · Zerodha · PayTM Money · CoinSwitch"
-                    : "HDFC Bank account statement (PDF)"}
+                    : "HDFC Bank · ICICI Bank account statement (PDF)"}
                 </p>
               </div>
               <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
