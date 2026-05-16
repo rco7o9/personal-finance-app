@@ -7,7 +7,7 @@ For each transaction row in the statement, extract:
 - date: transaction date in YYYY-MM-DD format
 - description: fund scheme name
 - amount: transaction amount as a positive number (strip ₹ and commas)
-- type: "debit" for purchases, "credit" for redemptions/withdrawals
+- type: "credit" for purchases, "debit" for redemptions/withdrawals
 - rowType: always "investment"
 - assetName: mutual fund scheme name (full name)
 - quantity: units purchased/redeemed
@@ -35,7 +35,7 @@ export const paytmMoneySkill: SkillTemplate = {
         date: "2021-01-14",
         description: "SBI Bluechip Fund - Regular Plan Growth",
         amount: 15042,
-        type: "debit",
+        type: "credit",
         rowType: "investment",
         assetName: "SBI Bluechip Fund - Regular Plan Growth",
         quantity: 48.756,

@@ -171,6 +171,7 @@ export function StatementUploader({ personId, initialPendingRows }: Props) {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, localStatus: "confirmed" } : r)));
     try {
       await apiPatch(`/statements/${id}`, { action: "confirm" });
+      setRows((prev) => prev.filter((r) => r.id !== id));
     } catch {
       setRows((prev) => prev.map((r) => (r.id === id ? { ...r, localStatus: "pending" } : r)));
     }
@@ -182,6 +183,7 @@ export function StatementUploader({ personId, initialPendingRows }: Props) {
     );
     try {
       await apiPatch(`/statements/${id}`, { action: "edit", assetName, amountInr });
+      setRows((prev) => prev.filter((r) => r.id !== id));
     } catch {
       setRows((prev) => prev.map((r) => (r.id === id ? { ...r, localStatus: "editing" } : r)));
     }
