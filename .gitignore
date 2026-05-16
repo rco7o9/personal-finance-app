@@ -14,6 +14,9 @@ frontend/out/
 # NestJS build output
 backend/dist/
 
+# Agents build output
+agents/dist/
+
 # Runtime caches (persisted via volume mount, not committed)
 backend/.cache/
 
@@ -31,6 +34,9 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+
+# Claude Code session memory (local only — not project docs)
+.claude/projects/
 
 #seed data
 investments_seed_data/
