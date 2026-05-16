@@ -40,3 +40,6 @@ Thumbs.db
 
 #seed data
 investments_seed_data/
+
+#agent test files
+test_files/
