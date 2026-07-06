@@ -1,5 +1,6 @@
 import { HttpException, HttpStatus, Injectable, Inject } from "@nestjs/common";
 import { Pool } from "pg";
+import Decimal from "decimal.js";
 
 export type StatementMetadata = {
   type: "investment" | "expense";
@@ -226,6 +227,12 @@ export class StatementsService {
         ),
       );
 
+      // Pre-fetch historical USD/INR rates for all transaction dates if needed
+      const usdToInrRates =
+        nativeCurrencyCode === "USD"
+          ? await this.fetchHistoricalUsdToInr(transactions.map((t) => t.date))
+          : new Map<string, Decimal>();
+
       await client.query("BEGIN");
 
       let inserted = 0;
@@ -271,6 +278,11 @@ export class StatementsService {
         const quantity = txn.quantity ?? 0;
         const price = txn.price ?? 0;
 
+        const fxRate = usdToInrRates.get(txn.date);
+        const amountInr = fxRate
+          ? new Decimal(amount).mul(fxRate).toDecimalPlaces(4).toNumber()
+          : amount;
+
         const insertRow = await client.query<{ id: number }>(
           `INSERT INTO investment_transaction
              (asset_id, person_id, financial_institution_id, type, quantity, price,
@@ -287,7 +299,7 @@ export class StatementsService {
             quantity,
             price,
             amount,
-            amount, // amount_inr = amount in MVP (no FX conversion)
+            amountInr,
             currencyId,
             txn.date,
             txn.confidence,
@@ -578,6 +590,33 @@ export class StatementsService {
       [ids],
     );
     return result.rows;
+  }
+
+  // Fetches historical USD→INR rates from Frankfurter for each date in the list.
+  // Walks back up to 7 days for weekends/holidays (Frankfurter only returns trading days).
+  private async fetchHistoricalUsdToInr(dates: string[]): Promise<Map<string, Decimal>> {
+    const uniqueDates = [...new Set(dates)].sort();
+    if (uniqueDates.length === 0) return new Map();
+
+    // Expand start by 7 days so weekends before the earliest date are covered
+    const expandedStart = new Date(uniqueDates[0]);
+    expandedStart.setDate(expandedStart.getDate() - 7);
+    const start = expandedStart.toISOString().slice(0, 10);
+    const end = uniqueDates[uniqueDates.length - 1];
+
+    const res = await fetch(`https://api.frankfurter.dev/v1/${start}..${end}?base=USD&symbols=INR`);
+    if (!res.ok) throw new Error(`Frankfurter HTTP ${res.status}`);
+
+    const data = (await res.json()) as { rates: Record<string, { INR: number }> };
+    const tradingDays = Object.keys(data.rates).sort();
+
+    const rateMap = new Map<string, Decimal>();
+    for (const date of uniqueDates) {
+      const prior = tradingDays.filter((d) => d <= date).pop();
+      if (!prior) throw new Error(`No USD/INR rate found for or before ${date}`);
+      rateMap.set(date, new Decimal(data.rates[prior].INR));
+    }
+    return rateMap;
   }
 
   private async fetchPendingExpenseRows(

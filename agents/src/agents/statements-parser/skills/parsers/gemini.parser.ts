@@ -46,6 +46,29 @@ const RESPONSE_SCHEMA = {
   required: ["transactions"],
 };
 
+const RETRY_DELAYS_MS = [2000, 5000, 10000];
+
+async function generateWithRetry(
+  model: ReturnType<InstanceType<typeof GoogleGenerativeAI>["getGenerativeModel"]>,
+  request: Parameters<typeof model.generateContent>[0],
+): ReturnType<typeof model.generateContent> {
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      return await model.generateContent(request);
+    } catch (err: unknown) {
+      const is503 =
+        err instanceof Error &&
+        (err.message.includes("503") || err.message.includes("Service Unavailable"));
+      if (is503 && attempt < RETRY_DELAYS_MS.length) {
+        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS_MS[attempt]));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("unreachable");
+}
+
 export async function parseGemini({
   file,
   skill,
@@ -67,7 +90,7 @@ export async function parseGemini({
 
   const mimeType = skill.format === "pdf" ? "application/pdf" : "application/octet-stream";
 
-  const result = await model.generateContent({
+  const result = await generateWithRetry(model, {
     contents: [
       {
         role: "user",

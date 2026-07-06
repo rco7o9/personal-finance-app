@@ -8,18 +8,37 @@ These documents may contain RSU vesting events, option exercises, ESPP purchases
 For each transaction, extract:
 - date: transaction/release/settlement date in YYYY-MM-DD format
 - description: brief description (e.g. "RSU Release", "Option Exercise", "ESPP Purchase", "Stock Sale")
-- amount: total value in USD as a positive number (quantity × price for RSU/ESPP; extracted directly for sales)
+- amount: total USD value as a positive number — see rules below
 - type: "credit" for acquisitions (RSU, ESPP, option exercise), "debit" for sales/withdrawals
 - rowType: always "investment"
 - assetName: "Acme Corp, Inc."
-- quantity: number of shares
-- price: price per share in USD
-  - For RSU releases: use the Release Price (not FMV)
-  - For option exercises: use the Grant Price (not FMV)
-  - For ESPP: use the purchase price
-  - For sales: use the actual sale price
+- quantity: number of shares — see rules below
+- price: price per share in USD — see rules below
 - confidence: 0.9
 - source_text: verbatim text of the row/section from the document
+
+Field rules by document type:
+
+RSU Release documents (contain "Number of Restricted Awards Released/Sold/Disbursed" and "Gross Release Value"):
+  - quantity: use ONLY "Number of Restricted Awards Disbursed" (NOT "Quantity Released" or "Number of Restricted Awards Released")
+  - price: use the "Release Price"
+  - amount: "Gross Release Value" MINUS the "Total Value" from the "Value of Shares Sold" section
+    (this gives the net USD value of the shares actually received after tax withholding)
+
+Option exercise documents:
+  - quantity: "Held Quantity" (shares kept)
+  - price: Grant Price (NOT Fair Market Value)
+  - amount: "Cost of Options" from the Cost table
+
+ESPP documents:
+  - quantity: "Shares Purchased"
+  - price: Purchase Price
+  - amount: quantity × price
+
+Sale/withdrawal documents:
+  - quantity: "Shares Sold"
+  - price: "Market Price Per Unit"
+  - amount: "Gross Proceeds"
 
 Do NOT merge multiple transactions into one element.
 Do NOT return "exactly one element" — return ALL transactions found.
@@ -37,16 +56,21 @@ export const employerStockSkill: SkillTemplate = {
   fewShotExamples: [
     {
       sourceText:
-        "Release Date: 09/15/2022  Number of Restricted Awards Disbursed: 500  Release Price: $12.50",
+        "Release Date: 15-Sep-2025  Release Price: $7.80 USD  Quantity Released: 3,112  " +
+        "Number of Restricted Awards Released: 3,112  Number of Restricted Awards Sold: 1,325  " +
+        "Number of Restricted Awards Disbursed: 1,787  Gross Release Value: $24,273.60 USD  " +
+        "Value of Shares Sold — Total Value: $10,384.46 USD",
       parsed: {
-        date: "2022-09-15",
+        date: "2025-09-15",
         description: "RSU Release",
-        amount: 6250,
+        // amount = Gross Release Value ($24,273.60) - Total Value of Shares Sold ($10,384.46)
+        amount: 13889.14,
         type: "credit",
         rowType: "investment",
         assetName: "Acme Corp, Inc.",
-        quantity: 500,
-        price: 12.5,
+        // quantity = Number of Restricted Awards Disbursed (NOT Quantity Released)
+        quantity: 1787,
+        price: 7.8,
       },
     },
   ],
