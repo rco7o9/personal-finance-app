@@ -34,6 +34,9 @@ export interface ParsedTransaction {
   assetName?: string;
   quantity?: number;
   price?: number;
+  // Trading exchange for equity platforms (e.g. "NSE" / "BSE") — used to derive the
+  // Yahoo Finance ticker suffix when a new asset is auto-created.
+  exchange?: string;
   confidence: number;
   source_text: string;
 }

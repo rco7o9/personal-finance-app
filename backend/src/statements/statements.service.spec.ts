@@ -218,7 +218,11 @@ describe("StatementsService", () => {
   describe("reviewTransaction", () => {
     it("deletes investment_transaction on reject", async () => {
       const pool = {
-        query: jest.fn().mockResolvedValueOnce({ rows: [], rowCount: 1 }), // DELETE investment_transaction
+        query: jest
+          .fn()
+          .mockResolvedValueOnce({ rows: [{ asset_id: 5 }], rowCount: 1 }) // SELECT asset_id
+          .mockResolvedValueOnce({ rows: [], rowCount: 1 }) // DELETE investment_transaction
+          .mockResolvedValueOnce({ rows: [], rowCount: 0 }), // DELETE asset (orphan cleanup, no match)
       } as never;
       const svc = new StatementsService(pool);
       await svc.reviewTransaction(42, "reject");
@@ -232,13 +236,14 @@ describe("StatementsService", () => {
       const pool = {
         query: jest
           .fn()
+          .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // SELECT asset_id — not pending/not found
           .mockResolvedValueOnce({ rows: [], rowCount: 0 }) // DELETE investment_transaction — not found
           .mockResolvedValueOnce({ rows: [], rowCount: 1 }), // DELETE expense
       } as never;
       const svc = new StatementsService(pool);
       await svc.reviewTransaction(99, "reject");
       const calls = (pool as { query: jest.Mock }).query.mock.calls as [string, unknown[]][];
-      expect(calls[1]?.[0]).toContain("DELETE FROM expense");
+      expect(calls[2]?.[0]).toContain("DELETE FROM expense");
     });
 
     it("confirms investment_transaction row", async () => {

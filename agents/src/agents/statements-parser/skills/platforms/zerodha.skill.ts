@@ -13,5 +13,6 @@ export const zerodhaSkill: SkillTemplate = {
     isin: "description",
     quantity: "quantity",
     price: "price",
+    exchange: "exchange",
   },
 };

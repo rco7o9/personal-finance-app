@@ -67,6 +67,7 @@ interface AgentTransaction {
   assetName?: string;
   quantity?: number;
   price?: number;
+  exchange?: string;
   confidence: number;
   source_text: string;
 }
@@ -243,12 +244,16 @@ export class StatementsService {
         const assetLabel = txn.assetName ?? txn.description;
         const amount = txn.amount;
 
-        // Look up asset: name first, then ticker_symbol with .NS/.BO suffix variants,
-        // then txn.description (platforms like IndMoney map stock symbol → description).
+        // Look up asset: name first (normalising hyphen/whitespace variants — free-text
+        // extractors like the Paytm Money PDF parser aren't always consistent about
+        // "Direct Growth" vs "Direct-Growth"), then ticker_symbol with .NS/.BO suffix
+        // variants, then txn.description (platforms like IndMoney map stock symbol → description).
         const ticker = txn.description !== assetLabel ? txn.description : "";
         const assetSearch = await client.query<{ id: number }>(
           `SELECT id FROM asset
            WHERE lower(name) = lower($1)
+              OR regexp_replace(lower(name), '[-\\s]+', ' ', 'g')
+                 = regexp_replace(lower($1), '[-\\s]+', ' ', 'g')
               OR lower(ticker_symbol) = lower($1)
               OR lower(ticker_symbol) = lower($1 || '.NS')
               OR lower(ticker_symbol) = lower($1 || '.BO')
@@ -260,10 +265,24 @@ export class StatementsService {
         if (assetSearch.rowCount && assetSearch.rowCount > 0) {
           assetId = assetSearch.rows[0].id;
         } else {
+          const newAssetPricing = this.resolveNewAssetPricing(
+            metadata.platform,
+            assetLabel,
+            ticker,
+            txn.exchange,
+          );
           const newAsset = await client.query<{ id: number }>(
-            `INSERT INTO asset (name, investment_category_id, currency_id)
-             VALUES ($1, $2, $3) RETURNING id`,
-            [assetLabel, categoryId, currencyId],
+            `INSERT INTO asset (name, investment_category_id, currency_id,
+                                 ticker_symbol, exchange, price_source)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+            [
+              assetLabel,
+              categoryId,
+              currencyId,
+              newAssetPricing.tickerSymbol,
+              newAssetPricing.exchange,
+              newAssetPricing.priceSource,
+            ],
           );
           assetId = newAsset.rows[0].id;
         }
@@ -329,6 +348,33 @@ export class StatementsService {
     } finally {
       client.release();
     }
+  }
+
+  // Derives ticker_symbol/exchange/price_source for a brand-new asset from data already
+  // present in the statement — never guesses. Platforms whose statements don't carry
+  // enough information to resolve a price source (e.g. Paytm Money mutual fund AMFI
+  // codes) are left null so refreshHoldingPrices skips them until a human fills it in.
+  private resolveNewAssetPricing(
+    platform: string,
+    assetLabel: string,
+    ticker: string,
+    exchange: string | undefined,
+  ): { tickerSymbol: string | null; exchange: string | null; priceSource: string | null } {
+    if (platform === "zerodha" && exchange) {
+      const suffix = exchange.toUpperCase() === "NSE" ? "NS" : "BO";
+      return {
+        tickerSymbol: `${assetLabel}.${suffix}`,
+        exchange: exchange.toUpperCase(),
+        priceSource: "yahoo_finance",
+      };
+    }
+    if (platform === "indmoney" && ticker) {
+      return { tickerSymbol: ticker, exchange: null, priceSource: "yahoo_finance" };
+    }
+    if (platform === "coinswitch") {
+      return { tickerSymbol: assetLabel, exchange: null, priceSource: "coinmarketcap" };
+    }
+    return { tickerSymbol: null, exchange: null, priceSource: null };
   }
 
   private async insertExpenseTransactions(
@@ -553,12 +599,33 @@ export class StatementsService {
   }
 
   private async deleteTransaction(id: number): Promise<void> {
+    const assetRow = await this.pool.query<{ asset_id: number }>(
+      "SELECT asset_id FROM investment_transaction WHERE id = $1 AND status = 'pending'",
+      [id],
+    );
     const invResult = await this.pool.query(
       "DELETE FROM investment_transaction WHERE id = $1 AND status = 'pending'",
       [id],
     );
     if ((invResult.rowCount ?? 0) === 0) {
       await this.pool.query("DELETE FROM expense WHERE id = $1 AND status = 'pending'", [id]);
+      return;
+    }
+
+    // If rejecting this row leaves behind an asset that was auto-created for it and
+    // never got a price source resolved, and no other transaction references it, clean
+    // it up — otherwise it lingers as a permanently NULL-priced orphan.
+    const assetId = assetRow.rows[0]?.asset_id;
+    if (assetId) {
+      await this.pool.query(
+        `DELETE FROM asset a
+         WHERE a.id = $1
+           AND a.ticker_symbol IS NULL
+           AND a.price_source IS NULL
+           AND NOT EXISTS (SELECT 1 FROM investment_transaction it WHERE it.asset_id = a.id)
+           AND NOT EXISTS (SELECT 1 FROM holding h WHERE h.asset_id = a.id)`,
+        [assetId],
+      );
     }
   }
 
