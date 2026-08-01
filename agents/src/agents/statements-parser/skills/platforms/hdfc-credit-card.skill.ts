@@ -1,4 +1,5 @@
 import type { SkillTemplate } from "../../types";
+import { EXPENSE_CATEGORY_LIST, VENDOR_CATEGORY_GUIDANCE } from "../vendor-rules";
 
 const systemPromptTemplate = `You are a credit card statement parser for HDFC Bank credit card statements.
 
@@ -22,11 +23,13 @@ For each transaction row, extract:
   guessing.
 - rowType: classify as one of:
     "expense" — purchases, merchant charges
+    "income" — a refund or cashback credited back to the card (see "Refunds" below).
+      This is NOT the same as a bill payment — a bill payment is
+      "internal_transfer"/"own_account"; a refund is "income".
     "internal_transfer" — money movement that is NOT real household spend (see below)
     "ignore" — late fees, interest charges, GST/tax lines that are not meaningful expenses
 - category: for rowType "expense" only, classify into one of:
-    Food & Dining, Transportation, Shopping, Utilities, Healthcare,
-    Entertainment, Travel, Education, Rent, Insurance, Investments, Other
+    ${EXPENSE_CATEGORY_LIST}
 - transferType: REQUIRED when rowType is "internal_transfer", omit otherwise. One of:
     "own_account" — a payment TOWARD this credit card bill from a linked account,
       or a balance transfer — not a purchase
@@ -53,6 +56,8 @@ Also extract at the top level:
 
 Do NOT merge transactions. Return ALL rows found, for BOTH cardholders.
 Do NOT return "exactly one element" — return every row as a separate element.
+
+${VENDOR_CATEGORY_GUIDANCE}
 
 {{RETRY_CONTEXT}}`;
 
@@ -115,6 +120,60 @@ export const hdfcCreditCardSkill: SkillTemplate = {
         rowType: "internal_transfer",
         transferType: "own_account",
         confidence: 0.98,
+      },
+    },
+    {
+      sourceText: "22/01/2024  SWIGGY  ARJUN MEHTA  680.00",
+      parsed: {
+        date: "2024-01-22",
+        description: "SWIGGY",
+        amount: 680,
+        type: "debit",
+        rowType: "expense",
+        category: "Food & Dining",
+        cardHolderName: "ARJUN MEHTA",
+        confidence: 0.97,
+      },
+    },
+    {
+      sourceText: "23/01/2024  UBER TRIP HELP.UBER.COM  PRIYA MEHTA  310.00",
+      parsed: {
+        date: "2024-01-23",
+        description: "UBER TRIP HELP.UBER.COM",
+        amount: 310,
+        type: "debit",
+        rowType: "expense",
+        category: "Transportation",
+        cardHolderName: "PRIYA MEHTA",
+        confidence: 0.97,
+      },
+    },
+    {
+      sourceText: "24/01/2024  BLINKIT  ARJUN MEHTA  920.00",
+      parsed: {
+        date: "2024-01-24",
+        description: "BLINKIT",
+        amount: 920,
+        type: "debit",
+        rowType: "expense",
+        category: "Groceries",
+        cardHolderName: "ARJUN MEHTA",
+        confidence: 0.97,
+      },
+    },
+    {
+      // A tax refund credited back to the card mid-statement — must NOT be
+      // classified as "expense" just because most other rows on a credit card
+      // statement are purchases. See "Refunds" guidance below.
+      sourceText: "26/01/2024  GLOBAL BLUE REFUND  ARJUN MEHTA  2,150.00 CR",
+      parsed: {
+        date: "2024-01-26",
+        description: "GLOBAL BLUE REFUND",
+        amount: 2150,
+        type: "credit",
+        rowType: "income",
+        cardHolderName: "ARJUN MEHTA",
+        confidence: 0.94,
       },
     },
   ],

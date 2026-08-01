@@ -29,4 +29,27 @@ describe("hdfcCreditCardSkill", () => {
     expect(names).toContain("ARJUN MEHTA");
     expect(names).toContain("PRIYA MEHTA");
   });
+
+  // A refund (e.g. a Global Blue tax refund credited back to the card) has no
+  // valid non-expense rowType without "income" — it used to get forced into
+  // "expense" since "expense"/"internal_transfer"/"ignore" were the only options.
+  it("prompt template offers 'income' as a rowType, for refunds credited back to the card", () => {
+    const prompt = hdfcCreditCardSkill.systemPromptTemplate ?? "";
+    expect(prompt).toMatch(/"income"\s*—/);
+  });
+
+  it("includes a refund few-shot example classified as income, not expense", () => {
+    const refundExample = (hdfcCreditCardSkill.fewShotExamples ?? []).find((e) =>
+      e.sourceText.includes("REFUND"),
+    );
+    expect(refundExample).toBeDefined();
+    expect(refundExample?.parsed.rowType).toBe("income");
+    expect(refundExample?.parsed.type).toBe("credit");
+  });
+
+  it("prompt template's category list includes the new household categories", () => {
+    const prompt = hdfcCreditCardSkill.systemPromptTemplate ?? "";
+    expect(prompt).toContain("Groceries");
+    expect(prompt).toContain("Maintenance");
+  });
 });
