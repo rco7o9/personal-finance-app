@@ -48,6 +48,11 @@ export default async function ExpensesPage({
         </div>
       ) : (
         <ExpensesDashboard
+          // Remount on person/date-range change — ExpensesDashboard otherwise keeps
+          // its `selected` and `detailCache` state across searchParams-driven
+          // re-renders (same component instance), showing the previous person's
+          // detail rows under the new person's category cards until a full refresh.
+          key={`${pid}-${startDate}-${endDate}`}
           summary={summary}
           personId={pid}
           startDate={startDate}

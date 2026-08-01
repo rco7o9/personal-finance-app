@@ -61,8 +61,13 @@ export function PersonSelector() {
 
   if (persons.length === 0) return null;
 
+  // Base UI's <Select.Value> resolves the selected item's label from this `items`
+  // map — it does NOT introspect SelectItem children for that. Without it, Value
+  // falls back to displaying the raw selected value (the numeric id as a string).
+  const items = Object.fromEntries(persons.map((p) => [String(p.id), p.name]));
+
   return (
-    <Select value={selectedId} onValueChange={handleSelect}>
+    <Select value={selectedId} onValueChange={handleSelect} items={items}>
       <SelectTrigger className="w-36 text-sm">
         <SelectValue placeholder="Select person" />
       </SelectTrigger>
