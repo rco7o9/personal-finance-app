@@ -68,10 +68,30 @@ function verifierNode(state: AgentStateType): Partial<AgentStateUpdate> {
     return { verificationStatus: "skipped" };
   }
 
+  // A parse that comes back with zero transactions and no balances at all is not
+  // a legitimate empty statement — it's Gemini returning effectively nothing.
+  // Defaulting missing balances to 0 would make `verify()` trivially pass (0 ≈ 0),
+  // silently reporting "verified" on a statement that was never actually read.
+  // Route it through the same retry/fail path as a real verification mismatch.
+  const gotNothing =
+    state.parsedTransactions.length === 0 &&
+    state.openingBalance === null &&
+    state.closingBalance === null;
+  if (gotNothing) {
+    if (state.attempts >= 3) {
+      return { verificationStatus: "failed" };
+    }
+    return {
+      verificationError: { computed: 0, expected: 0, diff: 0 },
+    };
+  }
+
+  const mode = skill.balanceCheck === "opening_closing_liability" ? "liability" : "asset";
   const error = verify(
     state.parsedTransactions,
     state.openingBalance ?? 0,
     state.closingBalance ?? 0,
+    mode,
   );
 
   if (!error) {
@@ -131,6 +151,20 @@ export async function runGraph(input: GraphInput): Promise<GraphOutput> {
   });
 
   if (finalState.errorMessage) {
+    // A later retry attempt can fail (e.g. a truncated Gemini response) after an
+    // earlier attempt already produced a valid parse. Falling back to that last
+    // good parse — flagged as failed verification, so every row lands in manual
+    // review — beats silently discarding real data the caller already paid for.
+    if (finalState.parsedTransactions.length > 0) {
+      return {
+        status: "ok",
+        verificationStatus: "failed",
+        attempts: finalState.attempts,
+        transactions: finalState.parsedTransactions,
+        openingBalance: finalState.openingBalance ?? undefined,
+        closingBalance: finalState.closingBalance ?? undefined,
+      };
+    }
     return {
       status: "error",
       verificationStatus: "skipped",

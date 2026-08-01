@@ -382,3 +382,220 @@ All columns nullable — existing confirmed rows unaffected.
 | ADR-023 | Gemini `source_text` extraction — no PDF parsing library |
 | ADR-024 | Agent-returns-data pattern — backend owns all DB writes |
 | ADR-025 | Static code-based skill registry — known platforms only, no dynamic registration |
+
+---
+
+# EXTENSION: Expense Statement Ingestion — Credit Card, Transfer Classification, Auto-Approval
+
+**Status:** Spec drafted 2026-08-01. Extends Phase 3b above; no changes to the core
+agent architecture (ADR-021–025 all still apply unchanged).
+
+## 11. Objective
+
+Ingest HDFC Credit Card statements alongside the existing HDFC/ICICI bank statement
+skills, classify every row into a spend category, and — critically — recognize the
+two ways money moves without being a real expense:
+
+1. **Credit card bill payment** — appears on the *bank* statement as a lump-sum debit
+   to the credit card. The underlying purchases are already itemized on the *credit
+   card* statement. Counting both double-counts the spend.
+2. **Household transfer** — Arjun ↔ Priya move money between themselves (rent
+   split, reimbursement, shared groceries). Not spend by the household; it's an
+   internal wash.
+
+A third existing case — SIP/investment debits from a bank account — is already
+correctly excluded (`rowType: "investment"` rows are filtered before insert) but
+gets the same explicit treatment here for prompt consistency.
+
+**Target users:** Arjun (primary HDFC cardholder, sole HDFC bank account) and
+Priya (add-on HDFC cardholder, own HDFC bank account, two ICICI bank accounts).
+
+**Key wrinkle driving the design:** the HDFC Credit Card statement is a single PDF
+covering **both** Arjun's primary card and Priya's add-on card on the same
+account. Person attribution therefore cannot be "whoever selected themselves in the
+upload picker" — it must be resolved **per transaction** from the cardholder name
+printed in the statement.
+
+**Success looks like:** Uploading a monthly HDFC CC statement splits transactions
+between Arjun and Priya correctly; uploading the following month's HDFC bank
+statement recognizes the CC bill payment line and stores it as a tagged transfer,
+not a second expense; the review queue shows only the handful of rows the model
+wasn't confident about — everything else is auto-approved.
+
+## 12. Acceptance Criteria
+
+### AC-E1 — HDFC Credit Card skill
+- New platform `hdfc-credit-card` registered in `skills/registry.ts`, format `pdf`,
+  `parserType: "gemini"`, `balanceCheck: "opening_closing"` (previous balance +
+  purchases − payments/credits ≈ new balance, ±₹1 tolerance — same check style as
+  `hdfc-bank`)
+- Every transaction is attributed to a cardholder. The skill prompt instructs Gemini
+  to read the cardholder name printed against each transaction/section (HDFC CC
+  statements group transactions under "Domestic Transactions — <Name>" headers or
+  print the cardholder name per line) and populate `cardHolderName` verbatim
+- Categorised into the same static category list as bank statements
+
+### AC-E2 — Per-row person resolution
+- `ParsedTransaction` gains an optional `cardHolderName?: string` field
+- Backend resolves `cardHolderName` → `person_id` via case-insensitive first-name
+  match against the `person` table (`Arjun`, `Priya`)
+- If `cardHolderName` is absent or matches no known person, fall back to
+  `metadata.personId` (the person selected in the upload UI) — never drop the row
+  or throw
+- Applies to any platform that can mix cardholders in one file (initially just
+  `hdfc-credit-card`); bank statements continue to use `metadata.personId` directly
+  since one bank statement PDF = one account = one person
+
+### AC-E3 — Transfers are stored and tagged, never dropped
+- `ParsedTransaction` gains an optional `transferType?: "investment_platform" |
+  "household_member" | "own_account"`, required whenever `rowType ===
+  "internal_transfer"`
+- On insert, `internal_transfer` rows are no longer filtered out. They are written
+  to `expense` with `category_id` = the `"Transfer"` category and
+  `transfer_type` set to the classified value
+- Reports that compute "total spend" must filter `WHERE transfer_type IS NULL`
+  (documented here for whoever builds the expenses report page next — no such page
+  exists yet, so no query changes needed in this feature)
+- `rowType: "investment"` and `rowType: "income"` rows remain filtered out
+  entirely (unchanged from current behavior) — out of scope for this feature;
+  investment debits are already captured via the investment ingestion pipeline
+- `rowType: "ignore"` rows (bank fees, tax lines) remain dropped
+
+### AC-E4 — Real per-row confidence, not a hardcoded constant
+- Remove the literal `confidence: 0.85` instruction from `hdfc-bank.skill.ts` and
+  `icici-bank.skill.ts` — replace with a calibration rubric in the prompt:
+  - **0.95–1.0** — well-known merchant/pattern, unambiguous category and rowType
+  - **0.70–0.94** — recognizable but with some ambiguity (generic UPI narration,
+    category inferred rather than stated, uncertain cardholder attribution)
+  - **< 0.70** — garbled/truncated text, unfamiliar merchant, ambiguous rowType,
+    category, or transferType
+- Include at least one high-confidence and one low-confidence few-shot example per
+  skill so the model has calibration anchors, not just a format example
+
+### AC-E5 — Confidence-based auto-approval for expense rows
+- Threshold: **0.85** (matches the existing "low confidence" cutoff already used in
+  the investment review UI)
+- A row is inserted with `status = 'confirmed'` directly (skipping manual review)
+  iff `confidence >= 0.85` **and** the statement-level `verificationStatus !==
+  'failed'`. If the whole statement failed its balance check, every row from it
+  goes to `'pending'` regardless of individual confidence — something is off with
+  the parse as a whole
+- Otherwise inserted with `status = 'pending'` as today
+- Applies uniformly to expense and transfer rows alike — a misclassified transfer
+  that's actually real spend is a worse error than an unnecessary review click, so
+  transfers don't get a free pass on the confidence gate
+- This is a deliberate divergence from the investment flow, where every row still
+  requires a manual Confirm click regardless of confidence — investment statements
+  are low-volume (tens of rows/month); expense statements are high-volume (often
+  100+ rows/month) and the user has explicitly asked not to hand-review all of them
+
+### AC-E6 — Frontend surfaces the auto-approval split
+- `hdfc-credit-card` added to `EXPENSE_PLATFORMS` in `StatementUploader.tsx`
+- Upload summary shows the breakdown, not just "+N new": auto-approved count,
+  needs-review count, skipped (dedup) count
+- Pending review table gains a **Person** column — necessary now that a single CC
+  upload can contain rows belonging to either Arjun or Priya, so the reviewer
+  can catch a misattributed cardholder before confirming
+- Pending review table's Platform column shows the real institution/product label
+  (e.g. "HDFC Credit Card") instead of the current hardcoded literal `"expense"`
+  string
+- `CATEGORY_BADGE` gains entries for the 14 expense categories, same visual
+  language as the existing investment category badges
+
+## 13. Scope
+
+### In scope
+- `agents/src/agents/statements-parser/skills/platforms/hdfc-credit-card.skill.ts`
+  — new skill file
+- Rewritten prompts (confidence rubric + transfer few-shot examples) for
+  `hdfc-bank.skill.ts` and `icici-bank.skill.ts`
+- `types.ts` — add `cardHolderName?`, `transferType?` to `ParsedTransaction`
+- `gemini.parser.ts` — extend `RESPONSE_SCHEMA` with the two new fields
+- `skills/registry.ts` — register `hdfc-credit-card`
+- `backend/src/statements/statements.service.ts`:
+  - person resolution by cardholder name (with fallback)
+  - transfer-row insert path (category = Transfer, transfer_type set)
+  - auto-approval branch (confidence + verification gate)
+  - `raw_source` gains the resolved platform/institution label for display
+  - `PendingRow` gains `personName`
+- `frontend/src/app/(app)/statements/StatementUploader.tsx` — CC platform option,
+  summary breakdown, Person column, Platform column fix, expense category badges
+- `frontend/src/types/index.ts` — extend `UploadResponse`/`PendingTransaction` to
+  match
+- New ADR-026 documenting the transfer/auto-approval/person-attribution decisions
+
+### Out of scope
+- ICICI Credit Card or any other card issuer (HDFC only, per user)
+- Income row ingestion (still dropped, unchanged)
+- A dedicated expenses reporting/dashboard page — doesn't exist yet; the
+  `transfer_type IS NULL` filter is documented for whenever that page is built
+- "Holdings rebuild on confirm" — carried over from last session's TODO, untouched
+  here
+- Any new DB migration — `expense.transfer_type` and `expense.person_id` already
+  exist (migrations 001, 002); this feature only starts populating them correctly
+
+## 14. Key Design Decisions
+
+### Per-row person attribution, not per-upload
+An add-on card statement is one file with two cardholders. Forcing a per-upload
+person selector would require the user to manually split a single PDF or upload it
+twice and somehow suppress half the rows each time — not practical. Gemini already
+reads the cardholder name per transaction section; extracting it costs nothing
+extra, same rationale as `source_text` in ADR-023.
+
+### Store transfers, don't drop them
+The `expense.transfer_type` enum (`investment_platform` / `household_member` /
+`own_account`) was added in migration 002 specifically for this purpose and has
+been unused. Dropping `internal_transfer` rows (today's behavior) silently
+discards the money trail — the user can't see "I paid ₹X to my CC bill this
+month" anywhere. Storing them with the tag preserves reconciliation ability while
+keeping them out of expense totals via a `WHERE transfer_type IS NULL` filter.
+
+### Auto-approval only on both row confidence AND statement verification
+Gating on row confidence alone would auto-approve every row from a statement whose
+arithmetic doesn't reconcile, just because each row individually looked clean to
+Gemini — a false sense of safety. Requiring `verificationStatus !== 'failed'` at
+the statement level too means a bad parse forces full manual review even if
+individual rows look confident.
+
+### No schema changes required
+Both `transfer_type` and `person_id` already exist on `expense`. This feature is
+entirely prompt engineering + backend logic + frontend display — a deliberately
+narrow blast radius.
+
+## 15. Testing Strategy
+
+- `hdfc-credit-card.skill.ts` unit test: required fields present, prompt template
+  contains `{{RETRY_CONTEXT}}`, cardholder-attribution instruction present
+- `gemini.parser.ts` schema test: `cardHolderName`/`transferType` accepted,
+  `transferType` not required for non-transfer rows
+- `statements.service.spec.ts` new cases:
+  - confidence ≥ 0.85 + verification passed → `status = 'confirmed'`
+  - confidence < 0.85 → `status = 'pending'`
+  - verification `'failed'` at statement level → all rows `'pending'` regardless
+    of individual confidence
+  - `internal_transfer` row → inserted with `category = 'Transfer'`,
+    `transfer_type` set, not silently dropped
+  - `cardHolderName: "PRIYA MEHTA"` resolves to Priya's `person_id`
+    regardless of `metadata.personId` sent by the uploader
+  - missing/unrecognized `cardHolderName` falls back to `metadata.personId`
+- Manual E2E: upload a real HDFC CC statement, verify the Arjun/Priya split;
+  upload the following bank statement, verify the CC payment line lands as a
+  tagged transfer and the review queue only shows genuinely low-confidence rows
+
+## 16. Boundaries
+
+| Rule | Reason |
+|---|---|
+| Never let auto-approval fire when statement `verificationStatus = 'failed'` | A failed balance check means something in the whole parse is untrustworthy |
+| Never hardcode a confidence value in a skill prompt | Defeats the auto-approval signal entirely — must reflect real per-row certainty |
+| Never fabricate real account numbers/UPI IDs in few-shot examples | Skill files are committed to git; use placeholder patterns only |
+| Always fall back to `metadata.personId` when cardholder name doesn't resolve | Never drop a row or throw for missing attribution |
+| Never count `transfer_type IS NOT NULL` rows in expense-total reports (future) | ADR-004-style discipline — silent double-counting is a correctness bug |
+| `rowType: "investment"` and `"income"` rows stay filtered out (unchanged) | Out of scope; investment debits are already captured elsewhere |
+
+## 17. ADRs — to be written alongside implementation
+
+| ADR | Decision |
+|---|---|
+| ADR-026 | Expense transfer classification (populate `transfer_type`), confidence-gated auto-approval, and per-row cardholder→person attribution for shared credit card statements |

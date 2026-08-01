@@ -53,14 +53,25 @@ function parseRows(file: Buffer, skill: SkillTemplate): Record<string, string>[]
 }
 
 const MONTH_ABBR: Record<string, string> = {
-  jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
-  jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+  jan: "01",
+  feb: "02",
+  mar: "03",
+  apr: "04",
+  may: "05",
+  jun: "06",
+  jul: "07",
+  aug: "08",
+  sep: "09",
+  oct: "10",
+  nov: "11",
+  dec: "12",
 };
 
 // Normalises crypto market pair symbols: "BTCINR" → "BTC-INR", "ETHINR" → "ETH-INR"
 function normaliseAssetName(raw: string): string {
-  return raw.replace(/^([A-Z0-9]+)(INR|USDT|ETH|BTC|USDC|BNB|SOL)$/i, (_, base, quote) =>
-    `${base.toUpperCase()}-${quote.toUpperCase()}`
+  return raw.replace(
+    /^([A-Z0-9]+)(INR|USDT|ETH|BTC|USDC|BNB|SOL)$/i,
+    (_, base, quote) => `${base.toUpperCase()}-${quote.toUpperCase()}`,
   );
 }
 

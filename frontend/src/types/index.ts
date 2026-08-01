@@ -82,13 +82,37 @@ export type PendingTransaction = {
   status: "pending" | "confirmed";
   confidenceScore: string | null;
   verificationStatus: "passed" | "failed" | "skipped" | null;
+  personName: string;
 };
 
 export type UploadResponse = {
   inserted: number;
+  autoApproved: number;
+  needsReview: number;
   skipped: number;
   verificationStatus: "passed" | "failed" | "skipped";
   transactions: PendingTransaction[];
+};
+
+export type ExpenseCategorySummary = {
+  categoryId: number;
+  categoryName: string;
+  total: string;
+  transactionCount: number;
+  percentage: string;
+};
+
+export type ExpenseSummary = {
+  totalSpend: string;
+  transactionCount: number;
+  categories: ExpenseCategorySummary[];
+};
+
+export type ExpenseDetailRow = {
+  id: number;
+  date: string;
+  description: string;
+  amount: string;
 };
 
 export type AssetDetail = {

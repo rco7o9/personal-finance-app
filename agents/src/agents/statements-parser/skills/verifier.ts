@@ -6,9 +6,14 @@ export function verify(
   transactions: ParsedTransaction[],
   openingBalance: number,
   closingBalance: number,
+  mode: "asset" | "liability" = "asset",
 ): VerificationError | null {
+  // Asset accounts (bank/savings): a credit deposits money, increasing the balance
+  // you hold. Liability accounts (credit card): a debit is a purchase that increases
+  // what you owe, and a credit is a payment that reduces it — the mirrored sign.
   const net = transactions.reduce((sum, tx) => {
-    return tx.type === "credit" ? sum + tx.amount : sum - tx.amount;
+    const isIncrease = mode === "liability" ? tx.type === "debit" : tx.type === "credit";
+    return isIncrease ? sum + tx.amount : sum - tx.amount;
   }, 0);
 
   const computed = openingBalance + net;

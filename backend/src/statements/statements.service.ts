@@ -22,14 +22,23 @@ export type PendingRow = {
   status: string;
   confidenceScore: string | null;
   verificationStatus: string | null;
+  personName: string;
 };
 
 export type UploadResult = {
   inserted: number;
+  autoApproved: number;
+  needsReview: number;
   skipped: number;
   verificationStatus: string;
   transactions: PendingRow[];
 };
+
+// An expense row auto-confirms (skips manual review) when its own confidence meets
+// this bar AND the statement-level verification didn't fail. A failed balance check
+// means something about the whole parse is untrustworthy, so every row from it goes
+// to manual review regardless of individual confidence. See ADR-026.
+const AUTO_APPROVE_CONFIDENCE_THRESHOLD = 0.85;
 
 // Maps platformId → financial_institution.name (matches seed data in migration 001)
 const PLATFORM_TO_FI: Record<string, string> = {
@@ -40,6 +49,7 @@ const PLATFORM_TO_FI: Record<string, string> = {
   "employer-stock": "Employer stock",
   "hdfc-bank": "HDFC Bank",
   "icici-bank": "ICICI Bank",
+  "hdfc-credit-card": "HDFC Bank",
 };
 
 // Maps platformId → investment_category.name for investment platforms
@@ -68,6 +78,8 @@ interface AgentTransaction {
   quantity?: number;
   price?: number;
   exchange?: string;
+  transferType?: "investment_platform" | "household_member" | "own_account";
+  cardHolderName?: string;
   confidence: number;
   source_text: string;
 }
@@ -134,7 +146,15 @@ export class StatementsService {
       );
     }
 
-    const relevant = agentRes.transactions.filter((t) => t.rowType === metadata.type);
+    // Expense uploads also keep "internal_transfer" rows — they're stored (tagged,
+    // excluded from spend totals) rather than dropped, so the money trail isn't lost.
+    // See ADR-026. "income", "investment", and "ignore" rows remain filtered out.
+    const relevant =
+      metadata.type === "expense"
+        ? agentRes.transactions.filter(
+            (t) => t.rowType === "expense" || t.rowType === "internal_transfer",
+          )
+        : agentRes.transactions.filter((t) => t.rowType === metadata.type);
 
     if (metadata.type === "investment") {
       return this.insertInvestmentTransactions(
@@ -337,7 +357,16 @@ export class StatementsService {
       const pendingRows =
         insertedIds.length > 0 ? await this.fetchPendingInvestmentRows(client, insertedIds) : [];
 
-      return { inserted, skipped, verificationStatus, transactions: pendingRows };
+      // Investment rows always require manual confirmation regardless of confidence
+      // (low volume, high stakes) — unlike expense auto-approval. See SPEC §AC-E5.
+      return {
+        inserted,
+        autoApproved: 0,
+        needsReview: inserted,
+        skipped,
+        verificationStatus,
+        transactions: pendingRows,
+      };
     } catch (err) {
       await client.query("ROLLBACK").catch(() => undefined);
       if (err instanceof HttpException) throw err;
@@ -383,7 +412,6 @@ export class StatementsService {
     fiName: string,
     verificationStatus: string,
   ): Promise<UploadResult> {
-    void fiName; // expense table has no financial_institution_id FK
     const client = await this.pool.connect();
     try {
       const inrRow = await client.query<{ id: number }>(
@@ -391,84 +419,112 @@ export class StatementsService {
       );
       const inrCurrencyId = inrRow.rows[0].id;
 
-      // Dedup: last 4 months
+      // Dedup: last 4 months, scoped to the whole household (not just the
+      // uploader's personId) — a shared credit card statement can resolve rows to
+      // either household member's person_id (see resolvePersonId below), so a
+      // single-person dedup set would miss or misfire across cardholders.
       const fourMonthsAgo = new Date();
       fourMonthsAgo.setMonth(fourMonthsAgo.getMonth() - 4);
-      const dedupRows = await client.query<{ date: string; amount: string; description: string }>(
-        `SELECT date::text, amount::text, description
+      const dedupRows = await client.query<{
+        person_id: number;
+        date: string;
+        amount: string;
+        description: string;
+      }>(
+        `SELECT person_id, date::text, amount::text, description
          FROM expense
-         WHERE person_id = $1
-           AND date >= $2`,
-        [metadata.personId, fourMonthsAgo.toISOString().slice(0, 10)],
+         WHERE date >= $1
+           AND person_id IN (
+             SELECT id FROM person WHERE home_id = (SELECT home_id FROM person WHERE id = $2)
+           )`,
+        [fourMonthsAgo.toISOString().slice(0, 10), metadata.personId],
       );
       const existingKeys = new Set(
         dedupRows.rows.map(
-          (r) => `${r.date.slice(0, 10)}|${r.amount}|${(r.description ?? "").toLowerCase()}`,
+          (r) =>
+            `${r.person_id}|${r.date.slice(0, 10)}|${r.amount}|${(r.description ?? "").toLowerCase()}`,
         ),
       );
 
       await client.query("BEGIN");
 
       let inserted = 0;
+      let autoApproved = 0;
+      let needsReview = 0;
       let skipped = 0;
-      const insertedIds: number[] = [];
+      const pendingIds: number[] = [];
 
       for (const txn of transactions) {
         const description = txn.description;
         const amount = txn.amount;
-        const dedupKey = `${txn.date}|${amount.toFixed(4)}|${description.toLowerCase()}`;
+        const personId = await this.resolvePersonId(client, txn.cardHolderName, metadata.personId);
+        const dedupKey = `${personId}|${txn.date}|${amount.toFixed(4)}|${description.toLowerCase()}`;
 
         if (existingKeys.has(dedupKey)) {
           skipped++;
           continue;
         }
 
-        // Look up or create expense category
-        const catName = txn.category ?? "Uncategorised";
-        const catSearch = await client.query<{ id: number }>(
-          "SELECT id FROM expense_category WHERE lower(name) = lower($1) LIMIT 1",
-          [catName],
-        );
-        let categoryId: number;
-        if (catSearch.rowCount && catSearch.rowCount > 0) {
-          categoryId = catSearch.rows[0].id;
-        } else {
-          const newCat = await client.query<{ id: number }>(
-            "INSERT INTO expense_category (name) VALUES ($1) RETURNING id",
-            [catName],
-          );
-          categoryId = newCat.rows[0].id;
-        }
+        // internal_transfer rows are stored (not real spend) so the money trail
+        // isn't lost — tagged with transfer_type and grouped under a dedicated
+        // "Transfer" category rather than whatever category Gemini guessed. See ADR-026.
+        const isTransfer = txn.rowType === "internal_transfer";
+        const catName = isTransfer ? "Transfer" : (txn.category ?? "Uncategorised");
+        const categoryId = await this.resolveOrCreateExpenseCategory(client, catName);
+
+        // Auto-approve only when this row's own confidence clears the bar AND the
+        // whole statement's balance check didn't fail — a failed statement-level
+        // check means every row from it needs a human look regardless of how
+        // confident Gemini was about any individual row. See ADR-026.
+        const autoApprove =
+          txn.confidence >= AUTO_APPROVE_CONFIDENCE_THRESHOLD && verificationStatus !== "failed";
+        const status = autoApprove ? "confirmed" : "pending";
 
         const insertRow = await client.query<{ id: number }>(
           `INSERT INTO expense
              (person_id, category_id, amount, currency_id, date, description,
-              status, confidence_score, verification_status, raw_source)
-           VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8, $9)
+              status, transfer_type, confidence_score, verification_status, raw_source)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            RETURNING id`,
           [
-            metadata.personId,
+            personId,
             categoryId,
             amount,
             inrCurrencyId,
             txn.date,
             description,
+            status,
+            isTransfer ? txn.transferType : null,
             txn.confidence,
             verificationStatus,
-            JSON.stringify({ source_text: txn.source_text, parsed: txn }),
+            JSON.stringify({ source_text: txn.source_text, platform: fiName, parsed: txn }),
           ],
         );
 
-        insertedIds.push(insertRow.rows[0].id);
+        if (autoApprove) {
+          autoApproved++;
+        } else {
+          needsReview++;
+          pendingIds.push(insertRow.rows[0].id);
+        }
         inserted++;
       }
 
       await client.query("COMMIT");
 
+      // Only rows that still need a human look are returned for display — the
+      // whole point of auto-approval is that the reviewer doesn't have to see them.
       const pendingRows =
-        insertedIds.length > 0 ? await this.fetchPendingExpenseRows(client, insertedIds) : [];
+        pendingIds.length > 0 ? await this.fetchPendingExpenseRows(client, pendingIds) : [];
 
-      return { inserted, skipped, verificationStatus, transactions: pendingRows };
+      return {
+        inserted,
+        autoApproved,
+        needsReview,
+        skipped,
+        verificationStatus,
+        transactions: pendingRows,
+      };
     } catch (err) {
       await client.query("ROLLBACK").catch(() => undefined);
       if (err instanceof HttpException) throw err;
@@ -479,6 +535,41 @@ export class StatementsService {
     } finally {
       client.release();
     }
+  }
+
+  // Resolves a printed cardholder name (e.g. from a shared credit card statement
+  // covering a primary + add-on card) to the correct person_id. Falls back to the
+  // person selected at upload time when the name is absent or matches nobody —
+  // never drops a row or throws for missing attribution. See ADR-026.
+  private async resolvePersonId(
+    client: import("pg").PoolClient,
+    cardHolderName: string | undefined,
+    fallbackPersonId: number,
+  ): Promise<number> {
+    if (!cardHolderName) return fallbackPersonId;
+    const match = await client.query<{ id: number }>(
+      `SELECT id FROM person WHERE $1 ILIKE '%' || name || '%' LIMIT 1`,
+      [cardHolderName],
+    );
+    return match.rowCount && match.rowCount > 0 ? match.rows[0].id : fallbackPersonId;
+  }
+
+  private async resolveOrCreateExpenseCategory(
+    client: import("pg").PoolClient,
+    name: string,
+  ): Promise<number> {
+    const catSearch = await client.query<{ id: number }>(
+      "SELECT id FROM expense_category WHERE lower(name) = lower($1) LIMIT 1",
+      [name],
+    );
+    if (catSearch.rowCount && catSearch.rowCount > 0) {
+      return catSearch.rows[0].id;
+    }
+    const newCat = await client.query<{ id: number }>(
+      "INSERT INTO expense_category (name) VALUES ($1) RETURNING id",
+      [name],
+    );
+    return newCat.rows[0].id;
   }
 
   async getPending(personId: number, type?: string): Promise<PendingRow[]> {
@@ -496,12 +587,14 @@ export class StatementsService {
            COALESCE(it.amount_inr, it.amount)::text AS "amountInr",
            it.status::text                    AS status,
            it.confidence_score::text          AS "confidenceScore",
-           it.verification_status             AS "verificationStatus"
+           it.verification_status             AS "verificationStatus",
+           p.name                             AS "personName"
          FROM investment_transaction it
          JOIN asset a ON a.id = it.asset_id
          JOIN investment_category ic ON ic.id = a.investment_category_id
          JOIN financial_institution fi ON fi.id = it.financial_institution_id
          JOIN currency c ON c.id = it.currency_id
+         JOIN person p ON p.id = it.person_id
          WHERE it.person_id = $1
            AND it.status = 'pending'
            AND it.confidence_score IS NOT NULL
@@ -524,7 +617,7 @@ export class StatementsService {
          e.id,
          e.date::text                    AS date,
          e.description                   AS "assetName",
-         'expense'                       AS platform,
+         COALESCE(e.raw_source->>'platform', 'expense') AS platform,
          ec.name                         AS "categoryName",
          NULL                            AS quantity,
          NULL                            AS price,
@@ -532,9 +625,11 @@ export class StatementsService {
          e.amount::text                  AS "amountInr",
          e.status::text                  AS status,
          e.confidence_score::text        AS "confidenceScore",
-         e.verification_status           AS "verificationStatus"
+         e.verification_status           AS "verificationStatus",
+         p.name                          AS "personName"
        FROM expense e
        JOIN expense_category ec ON ec.id = e.category_id
+       JOIN person p ON p.id = e.person_id
        WHERE e.person_id = $1
          AND e.status = 'pending'
          AND e.confidence_score IS NOT NULL
@@ -646,12 +741,14 @@ export class StatementsService {
          COALESCE(it.amount_inr, it.amount)::text AS "amountInr",
          it.status::text                    AS status,
          it.confidence_score::text          AS "confidenceScore",
-         it.verification_status             AS "verificationStatus"
+         it.verification_status             AS "verificationStatus",
+         p.name                             AS "personName"
        FROM investment_transaction it
        JOIN asset a ON a.id = it.asset_id
        JOIN investment_category ic ON ic.id = a.investment_category_id
        JOIN financial_institution fi ON fi.id = it.financial_institution_id
        JOIN currency c ON c.id = it.currency_id
+       JOIN person p ON p.id = it.person_id
        WHERE it.id = ANY($1)
        ORDER BY it.transacted_at DESC`,
       [ids],
@@ -695,7 +792,7 @@ export class StatementsService {
          e.id,
          e.date::text                    AS date,
          e.description                   AS "assetName",
-         'expense'                       AS platform,
+         COALESCE(e.raw_source->>'platform', 'expense') AS platform,
          ec.name                         AS "categoryName",
          NULL                            AS quantity,
          NULL                            AS price,
@@ -703,9 +800,11 @@ export class StatementsService {
          e.amount::text                  AS "amountInr",
          e.status::text                  AS status,
          e.confidence_score::text        AS "confidenceScore",
-         e.verification_status           AS "verificationStatus"
+         e.verification_status           AS "verificationStatus",
+         p.name                          AS "personName"
        FROM expense e
        JOIN expense_category ec ON ec.id = e.category_id
+       JOIN person p ON p.id = e.person_id
        WHERE e.id = ANY($1)
        ORDER BY e.date DESC`,
       [ids],

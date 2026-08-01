@@ -6,6 +6,7 @@ import { paytmMoneySkill } from "./platforms/paytm-money.skill";
 import { employerStockSkill } from "./platforms/employer-stock.skill";
 import { hdfcBankSkill } from "./platforms/hdfc-bank.skill";
 import { iciciBankSkill } from "./platforms/icici-bank.skill";
+import { hdfcCreditCardSkill } from "./platforms/hdfc-credit-card.skill";
 
 export const SKILL_REGISTRY: Record<string, SkillTemplate> = {
   zerodha: zerodhaSkill,
@@ -15,6 +16,7 @@ export const SKILL_REGISTRY: Record<string, SkillTemplate> = {
   "employer-stock": employerStockSkill,
   "hdfc-bank": hdfcBankSkill,
   "icici-bank": iciciBankSkill,
+  "hdfc-credit-card": hdfcCreditCardSkill,
 };
 
 export function getSkill(platformId: string): SkillTemplate {

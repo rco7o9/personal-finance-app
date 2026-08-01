@@ -89,3 +89,27 @@ describe("runGraph — gemini platform with verifier failure", () => {
     expect(output.attempts).toBe(3);
   });
 });
+
+describe("runGraph — gemini returns nothing at all", () => {
+  it("does not report a false 'passed' when Gemini returns zero transactions and no balances", async () => {
+    // Regression test: Gemini occasionally returns an effectively empty parse
+    // (no transactions, no balances). Defaulting missing balances to 0 made
+    // `verify()` trivially pass (0 ≈ 0), silently reporting success on a
+    // statement that was never actually read.
+    const { parseGemini } = require("./skills/parsers/gemini.parser");
+    process.env.GEMINI_API_KEY = "test-key";
+    parseGemini.mockResolvedValue({ transactions: [] });
+
+    const input: GraphInput = {
+      file: Buffer.from("%PDF-1.4"),
+      metadata: { type: "expense", platform: "hdfc-bank", format: "pdf", personId: 1 },
+    };
+
+    const output = await runGraph(input);
+
+    expect(output.verificationStatus).not.toBe("passed");
+    expect(output.verificationStatus).toBe("failed");
+    expect(output.attempts).toBe(3);
+    expect(output.transactions).toHaveLength(0);
+  });
+});

@@ -14,39 +14,15 @@ interface GeminiResponse {
   closingBalance?: number;
 }
 
-const RESPONSE_SCHEMA = {
-  type: "object",
-  properties: {
-    openingBalance: { type: "number", nullable: true },
-    closingBalance: { type: "number", nullable: true },
-    transactions: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          date: { type: "string" },
-          description: { type: "string" },
-          amount: { type: "number" },
-          type: { type: "string", enum: ["debit", "credit"] },
-          rowType: {
-            type: "string",
-            enum: ["expense", "income", "internal_transfer", "investment", "ignore"],
-          },
-          category: { type: "string", nullable: true },
-          assetName: { type: "string", nullable: true },
-          quantity: { type: "number", nullable: true },
-          price: { type: "number", nullable: true },
-          confidence: { type: "number" },
-          source_text: { type: "string" },
-        },
-        required: ["date", "description", "amount", "type", "rowType", "confidence", "source_text"],
-      },
-    },
-  },
-  required: ["transactions"],
-};
-
 const RETRY_DELAYS_MS = [2000, 5000, 10000];
+
+// The SDK has no default request timeout — a stalled connection would otherwise
+// hang this call (and the synchronous backend→agent→frontend chain behind it,
+// per ADR-024) forever instead of surfacing an error the retry loop can act on.
+// A real multi-cardholder HDFC CC statement (many transactions, each requiring a
+// verbatim source_text field) measured well over 150s to generate — 150s was too
+// tight and turned a legitimately-slow-but-working call into a false timeout.
+const REQUEST_TIMEOUT_MS = 280_000;
 
 async function generateWithRetry(
   model: ReturnType<InstanceType<typeof GoogleGenerativeAI>["getGenerativeModel"]>,
@@ -54,7 +30,7 @@ async function generateWithRetry(
 ): ReturnType<typeof model.generateContent> {
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     try {
-      return await model.generateContent(request);
+      return await model.generateContent(request, { timeout: REQUEST_TIMEOUT_MS });
     } catch (err: unknown) {
       const is503 =
         err instanceof Error &&
@@ -83,8 +59,19 @@ export async function parseGemini({
   const model = genai.getGenerativeModel({
     model: "gemini-3-flash-preview",
     generationConfig: {
+      // responseSchema deliberately omitted: verified against a real 111-transaction
+      // HDFC credit card statement that constraining gemini-3-flash-preview with a
+      // responseSchema for this shape produces malformed, unparseable JSON (breaks
+      // partway through the transactions array) — while the identical prompt without
+      // a schema returns clean, valid JSON matching it anyway. The system prompt
+      // already enumerates every field/type/enum exhaustively, so schema enforcement
+      // here is redundant with the prompt and actively harmful for this model.
       responseMimeType: "application/json",
-      responseSchema: RESPONSE_SCHEMA as never,
+      // Without an explicit cap, long statements (100+ transactions, each with a
+      // verbatim source_text field) can hit the model's default output budget and
+      // get cut off mid-JSON, which fails JSON.parse entirely. Set a high explicit
+      // ceiling so real-world statement lengths don't get truncated.
+      maxOutputTokens: 65536,
     },
   });
 

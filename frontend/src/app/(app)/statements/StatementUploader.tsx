@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { apiPostForm, apiPatch } from "@/lib/api";
+import { CATEGORY_BADGE, DEFAULT_BADGE } from "@/lib/categoryBadges";
 import type { PendingTransaction, UploadResponse } from "@/types";
 
 const INVESTMENT_PLATFORMS = [
@@ -20,18 +21,8 @@ const INVESTMENT_PLATFORMS = [
 const EXPENSE_PLATFORMS = [
   { value: "hdfc-bank", label: "HDFC Bank" },
   { value: "icici-bank", label: "ICICI Bank" },
+  { value: "hdfc-credit-card", label: "HDFC Credit Card" },
 ];
-
-const CATEGORY_BADGE: Record<string, string> = {
-  "US Equity": "bg-blue-500/20 text-blue-300 border-blue-400/30",
-  "Indian Equity": "bg-cyan-500/20 text-cyan-300 border-cyan-400/30",
-  "Mutual Fund": "bg-purple-500/20 text-purple-300 border-purple-400/30",
-  "Liquid Fund": "bg-teal-500/20 text-teal-300 border-teal-400/30",
-  ETF: "bg-teal-500/20 text-teal-300 border-teal-400/30",
-  Crypto: "bg-green-500/20 text-green-300 border-green-400/30",
-  "Employer RSU": "bg-orange-500/20 text-orange-300 border-orange-400/30",
-  Gold: "bg-yellow-500/20 text-yellow-300 border-yellow-400/30",
-};
 
 function formatTableDate(dateStr: string): string {
   return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short" }).format(
@@ -80,6 +71,8 @@ function toLocalRow(t: PendingTransaction): LocalRow {
 interface UploadSummary {
   filename: string;
   inserted: number;
+  autoApproved: number;
+  needsReview: number;
   skipped: number;
 }
 
@@ -153,6 +146,8 @@ export function StatementUploader({ personId, initialPendingRows }: Props) {
       setUploadSummary({
         filename: selectedFile.name,
         inserted: result.inserted,
+        autoApproved: result.autoApproved,
+        needsReview: result.needsReview,
         skipped: result.skipped,
       });
 
@@ -276,7 +271,7 @@ export function StatementUploader({ personId, initialPendingRows }: Props) {
                 <p className="text-muted-foreground mt-0.5 text-xs">
                   {statementType === "investment"
                     ? "INDMoney · Zerodha · PayTM Money · CoinSwitch"
-                    : "HDFC Bank · ICICI Bank account statement (PDF)"}
+                    : "HDFC Bank · ICICI Bank · HDFC Credit Card statement (PDF)"}
                 </p>
               </div>
               <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
@@ -310,11 +305,21 @@ export function StatementUploader({ personId, initialPendingRows }: Props) {
         {errorMsg && <p className="mt-3 text-sm text-red-500">{errorMsg}</p>}
 
         {uploadSummary && !selectedFile && (
-          <div className="mt-3 flex items-center gap-2 text-xs">
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
             <FileText className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
             <span className="text-muted-foreground font-medium">{uploadSummary.filename}</span>
             <span className="text-muted-foreground">·</span>
             <span className="font-medium text-green-400">+{uploadSummary.inserted} new</span>
+            {uploadSummary.autoApproved > 0 && (
+              <span className="text-muted-foreground">
+                {uploadSummary.autoApproved} auto-approved
+              </span>
+            )}
+            {uploadSummary.needsReview > 0 && (
+              <span className="font-medium text-amber-400">
+                {uploadSummary.needsReview} need review
+              </span>
+            )}
             {uploadSummary.skipped > 0 && (
               <span className="text-muted-foreground">{uploadSummary.skipped} skipped</span>
             )}
@@ -349,6 +354,7 @@ export function StatementUploader({ personId, initialPendingRows }: Props) {
                   <th className="pb-2 text-left font-medium">Date</th>
                   <th className="pb-2 text-left font-medium">Asset</th>
                   <th className="pb-2 text-left font-medium">Platform</th>
+                  <th className="pb-2 text-left font-medium">Person</th>
                   <th className="pb-2 text-left font-medium">Type</th>
                   <th className="pb-2 text-right font-medium">Units</th>
                   <th className="pb-2 text-right font-medium">Price</th>
@@ -399,7 +405,7 @@ function ReviewRow({ row, onConfirm, onReject, onEdit, onSaveEdit }: ReviewRowPr
     return (
       <tr className="bg-muted/30">
         <td className="text-muted-foreground py-3 pr-4 text-xs">{formatTableDate(row.date)}</td>
-        <td className="py-2 pr-4" colSpan={3}>
+        <td className="py-2 pr-4" colSpan={4}>
           <input
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
@@ -441,13 +447,9 @@ function ReviewRow({ row, onConfirm, onReject, onEdit, onSaveEdit }: ReviewRowPr
       <td className="text-muted-foreground py-3 pr-4 text-xs">{formatTableDate(row.date)}</td>
       <td className="py-3 pr-4 font-medium">{row.assetName}</td>
       <td className="text-muted-foreground py-3 pr-4">{row.platform}</td>
+      <td className="text-muted-foreground py-3 pr-4">{row.personName}</td>
       <td className="py-3 pr-4">
-        <Badge
-          className={cn(
-            "border text-xs",
-            CATEGORY_BADGE[row.categoryName] ?? "bg-secondary text-secondary-foreground",
-          )}
-        >
+        <Badge className={cn("border text-xs", CATEGORY_BADGE[row.categoryName] ?? DEFAULT_BADGE)}>
           {row.categoryName}
         </Badge>
       </td>
