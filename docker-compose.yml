@@ -1,3 +1,5 @@
+# All ports bind to 127.0.0.1 only: the app has no authentication (single-household,
+# local-only by design), so nothing should be reachable from the LAN.
 services:
   postgres:
     image: postgres:16-alpine
@@ -8,7 +10,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -28,7 +30,7 @@ services:
       INTERNAL_API_KEY: ${INTERNAL_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
     ports:
-      - "3002:3002"
+      - "127.0.0.1:3002:3002"
     volumes:
       - ./agents:/app
       - /app/node_modules
@@ -52,7 +54,7 @@ services:
       EMPLOYER_STOCK_INSTITUTION: ${EMPLOYER_STOCK_INSTITUTION:-Employer Stock Plan}
       EMPLOYER_STOCK_CATEGORY: ${EMPLOYER_STOCK_CATEGORY:-Employer RSU}
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     volumes:
       - ./backend:/app
       # Prevents the host's node_modules (macOS binaries) from overwriting
@@ -74,7 +76,7 @@ services:
       # Used by client components (runs in the browser, must be localhost)
       NEXT_PUBLIC_API_URL: http://localhost:3001
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -87,7 +89,7 @@ services:
     depends_on:
       - postgres
     ports:
-      - "8978:8978"
+      - "127.0.0.1:8978:8978"
     volumes:
       - cloudbeaver_data:/opt/cloudbeaver/workspace
 
