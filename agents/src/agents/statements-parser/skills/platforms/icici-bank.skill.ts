@@ -1,5 +1,11 @@
 import type { SkillTemplate } from "../../types";
 import { EXPENSE_CATEGORY_LIST, VENDOR_CATEGORY_GUIDANCE } from "../vendor-rules";
+import {
+  FAMILY_PAYEE_RULES,
+  MEMBER_NAMES_SENTENCE,
+  PRIMARY_MEMBER,
+  SECONDARY_MEMBER,
+} from "../../config/household";
 
 const systemPromptTemplate = `You are a bank statement parser for ICICI Bank account statements.
 
@@ -26,10 +32,10 @@ For each transaction row, extract:
       Recognize patterns like "CREDIT CARD PAYMENT", "AUTOPAY", "CC XXXX1234",
       "BILLDESK", card network names combined with "PAYMENT" in the narration.
     "household_member" — the counterparty is a named household member OTHER than
-      the statement holder (this household has two members: Arjun and Priya).
+      the statement holder (household members: ${MEMBER_NAMES_SENTENCE}).
       Match by the member's name appearing in the UPI/NEFT/IMPS narration text —
       do not try to infer this from account numbers, which you cannot see reliably.
-      Example patterns: "UPI-PRIYA...", "NEFT TO ARJUN MEHTA...".
+      Example patterns: "UPI-${SECONDARY_MEMBER.statementName}...", "NEFT TO ${PRIMARY_MEMBER.statementName}...".
     "investment_platform" — a SIP mandate or broker debit going to a known
       investment platform or AMC (e.g. Zerodha, mutual fund house names, "SIP",
       "ACH DEBIT" toward a fund house). This spend is already captured through the
@@ -117,10 +123,10 @@ export const iciciBankSkill: SkillTemplate = {
       },
     },
     {
-      sourceText: "21/01/2024  UPI-ARJUN MEHTA-P0091827  8000.00  -  12,170.75",
+      sourceText: `21/01/2024  UPI-${PRIMARY_MEMBER.statementName}-P0091827  8000.00  -  12,170.75`,
       parsed: {
         date: "2024-01-21",
-        description: "UPI-ARJUN MEHTA-P0091827",
+        description: `UPI-${PRIMARY_MEMBER.statementName}-P0091827`,
         amount: 8000,
         type: "debit",
         rowType: "internal_transfer",
@@ -187,18 +193,18 @@ export const iciciBankSkill: SkillTemplate = {
         confidence: 0.97,
       },
     },
-    {
-      sourceText: "30/01/2024  UPI-NEETA KAPOOR-R7729183  10000.00  -  11,501.75",
+    ...FAMILY_PAYEE_RULES.slice(-1).map((rule) => ({
+      sourceText: `30/01/2024  UPI-${rule.payees[0].toUpperCase()}-R7729183  10000.00  -  11,501.75`,
       parsed: {
         date: "2024-01-30",
-        description: "UPI-NEETA KAPOOR-R7729183",
+        description: `UPI-${rule.payees[0].toUpperCase()}-R7729183`,
         amount: 10000,
-        type: "debit",
-        rowType: "expense",
-        category: "Priya's Parents' Expense",
+        type: "debit" as const,
+        rowType: "expense" as const,
+        category: rule.category,
         confidence: 0.95,
       },
-    },
+    })),
     {
       sourceText: "31/01/2024  GLOBAL BLUE REFUND-VAT REFUND  3100.00  -  14,601.75",
       parsed: {

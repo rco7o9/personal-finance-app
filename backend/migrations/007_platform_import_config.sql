@@ -52,7 +52,7 @@ CREATE TABLE investment_transaction_stage (
 
 -- holding_stage mirrors holding exactly (including native columns from migration 006):
 -- Populated by promote-seed.ts dry-run before the real promotion commits,
--- so Arjun can verify net positions in CloudBeaver first.
+-- so the owner can verify net positions in CloudBeaver first.
 CREATE TABLE holding_stage (
   id                    SERIAL        PRIMARY KEY,
   asset_id              INT           NOT NULL REFERENCES asset_stage(id),
@@ -106,9 +106,9 @@ INSERT INTO platform_import_config (financial_institution_id, file_format, parse
     '{"table_cols": ["Date","Mutual Fund Scheme Name","Folio No","Type","Units","NAV","Amount","Status"], "buy_types": ["Purchase - SIP","Purchase - Lumpsum"], "sell_types": ["Withdraw"]}'
   ),
   (
-    (SELECT id FROM financial_institution WHERE name = 'Employer stock'),
+    (SELECT id FROM financial_institution WHERE name = 'Employer Stock Plan'),
     'pdf',
-    'employer-stock',
+    'employer_stock',
     '{"purchase_table": "Summary of Stock/Shares Holdings", "withdrawal_header_prefix": "Withdrawal on"}'
   );
 

@@ -30,6 +30,9 @@ const CSV_PATH = path.join(
 const EMPLOYER_STOCK_FI_ID = 7;
 const EMPLOYER_STOCK_RSU_CATEGORY_ID = 12;
 const USD_CURRENCY_ID = 2;
+// Employer identity comes from .env so the repository never names a real company.
+const EMPLOYER_ASSET_NAME = process.env.EMPLOYER_STOCK_ASSET_NAME ?? "Acme Corp, Inc.";
+const EMPLOYER_TICKER = process.env.EMPLOYER_STOCK_TICKER ?? "ACME";
 const PRIMARY_PERSON_ID = 1;
 
 // ─── CSV parsing ──────────────────────────────────────────────────────────────
@@ -123,10 +126,18 @@ async function run(): Promise<void> {
          price_source           = EXCLUDED.price_source,
          currency_id            = EXCLUDED.currency_id
        RETURNING id`,
-      ["Acme Corp, Inc.", EMPLOYER_STOCK_RSU_CATEGORY_ID, "ACME", "yahoo_finance", USD_CURRENCY_ID],
+      [
+        EMPLOYER_ASSET_NAME,
+        EMPLOYER_STOCK_RSU_CATEGORY_ID,
+        EMPLOYER_TICKER,
+        "yahoo_finance",
+        USD_CURRENCY_ID,
+      ],
     );
     const assetId = assetResult.rows[0].id;
-    console.log(`Upserted ACME asset (id=${assetId}, investment_category_id=${EMPLOYER_STOCK_RSU_CATEGORY_ID})`);
+    console.log(
+      `Upserted ACME asset (id=${assetId}, investment_category_id=${EMPLOYER_STOCK_RSU_CATEGORY_ID})`,
+    );
 
     // Delete existing Employer stock transactions (idempotency)
     const deleted = await client.query(
@@ -178,7 +189,9 @@ async function run(): Promise<void> {
     console.log(`Buy transactions: ${buyCount}`);
     console.log(`Sell transactions: ${sellCount}`);
     console.log(`Total: ${buyCount + sellCount}`);
-    console.log("\nNext: run refresh-holding-stage-prices.ts to rebuild holding_stage and refresh prices.");
+    console.log(
+      "\nNext: run refresh-holding-stage-prices.ts to rebuild holding_stage and refresh prices.",
+    );
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("Seed failed — rolled back:", err);

@@ -1,6 +1,11 @@
 import type { SkillTemplate } from "../../types";
+import { HOUSEHOLD } from "../../config/household";
 
-const systemPromptTemplate = `You are a financial statement parser for Employer RSU, ESPP, and stock option documents.
+// Employer equity (RSU / ESPP / stock options) issued through an employee stock plan
+// portal. The company is configured in household.config.json → employerStock.
+const { assetName } = HOUSEHOLD.employerStock;
+
+const systemPromptTemplate = `You are a financial statement parser for employee stock plan documents (RSU, ESPP, and stock options) for ${assetName}.
 
 Extract EVERY transaction as a separate element in the transactions array.
 These documents may contain RSU vesting events, option exercises, ESPP purchases, or stock sale/withdrawal records.
@@ -11,7 +16,7 @@ For each transaction, extract:
 - amount: total USD value as a positive number — see rules below
 - type: "credit" for acquisitions (RSU, ESPP, option exercise), "debit" for sales/withdrawals
 - rowType: always "investment"
-- assetName: "Acme Corp, Inc."
+- assetName: "${assetName}"
 - quantity: number of shares — see rules below
 - price: price per share in USD — see rules below
 - confidence: 0.9
@@ -48,7 +53,7 @@ Multiple withdrawal records within a single PDF must each be a separate element.
 
 export const employerStockSkill: SkillTemplate = {
   platformId: "employer-stock",
-  displayName: "Employer RSU",
+  displayName: HOUSEHOLD.employerStock.displayName,
   format: "pdf",
   parserType: "gemini",
   balanceCheck: "none",
@@ -56,21 +61,21 @@ export const employerStockSkill: SkillTemplate = {
   fewShotExamples: [
     {
       sourceText:
-        "Release Date: 15-Sep-2025  Release Price: $7.80 USD  Quantity Released: 3,112  " +
-        "Number of Restricted Awards Released: 3,112  Number of Restricted Awards Sold: 1,325  " +
-        "Number of Restricted Awards Disbursed: 1,787  Gross Release Value: $24,273.60 USD  " +
-        "Value of Shares Sold — Total Value: $10,384.46 USD",
+        "Release Date: 15-Mar-2025  Release Price: $10.00 USD  Quantity Released: 1,000  " +
+        "Number of Restricted Awards Released: 1,000  Number of Restricted Awards Sold: 400  " +
+        "Number of Restricted Awards Disbursed: 600  Gross Release Value: $10,000.00 USD  " +
+        "Value of Shares Sold — Total Value: $4,000.00 USD",
       parsed: {
-        date: "2025-09-15",
+        date: "2025-03-15",
         description: "RSU Release",
-        // amount = Gross Release Value ($24,273.60) - Total Value of Shares Sold ($10,384.46)
-        amount: 13889.14,
+        // amount = Gross Release Value ($10,000.00) - Total Value of Shares Sold ($4,000.00)
+        amount: 6000,
         type: "credit",
         rowType: "investment",
-        assetName: "Acme Corp, Inc.",
+        assetName,
         // quantity = Number of Restricted Awards Disbursed (NOT Quantity Released)
-        quantity: 1787,
-        price: 7.8,
+        quantity: 600,
+        price: 10,
       },
     },
   ],

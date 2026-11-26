@@ -154,7 +154,7 @@ INSERT INTO financial_institution (name) VALUES
   ('INDMoney'),
   ('PayTM Money'),
   ('CoinSwitch'),
-  ('Employer stock');
+  ('Employer Stock Plan');
 
 INSERT INTO expense_category (name, priority) VALUES
   ('Rent', 1);
@@ -170,7 +170,7 @@ INSERT INTO investment_category (name) VALUES
   ('Bank Savings');
 
 INSERT INTO person (name, home_id) VALUES
-  ('Arjun',    1),
+  ('Arjun', 1),
   ('Priya', 1);
 
 -- Down Migration

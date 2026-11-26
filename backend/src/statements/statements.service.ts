@@ -40,13 +40,18 @@ export type UploadResult = {
 // to manual review regardless of individual confidence. See ADR-026.
 const AUTO_APPROVE_CONFIDENCE_THRESHOLD = 0.85;
 
+// Employer stock plan (RSU/ESPP/options). Names are configurable so the repository
+// doesn't hardcode an employer — set these in .env to match your seeded rows.
+const EMPLOYER_STOCK_INSTITUTION = process.env.EMPLOYER_STOCK_INSTITUTION ?? "Employer Stock Plan";
+const EMPLOYER_STOCK_CATEGORY = process.env.EMPLOYER_STOCK_CATEGORY ?? "Employer RSU";
+
 // Maps platformId → financial_institution.name (matches seed data in migration 001)
 const PLATFORM_TO_FI: Record<string, string> = {
   zerodha: "Zerodha",
   indmoney: "INDMoney",
   coinswitch: "CoinSwitch",
   "paytm-money": "PayTM Money",
-  "employer-stock": "Employer stock",
+  "employer-stock": EMPLOYER_STOCK_INSTITUTION,
   "hdfc-bank": "HDFC Bank",
   "icici-bank": "ICICI Bank",
   "hdfc-credit-card": "HDFC Bank",
@@ -58,7 +63,7 @@ const PLATFORM_TO_CATEGORY: Record<string, string> = {
   indmoney: "US Equity",
   coinswitch: "Crypto",
   "paytm-money": "Indian Mutual Fund",
-  "employer-stock": "Employer RSU",
+  "employer-stock": EMPLOYER_STOCK_CATEGORY,
 };
 
 // Maps platformId → native currency code

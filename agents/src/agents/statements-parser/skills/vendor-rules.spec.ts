@@ -1,10 +1,12 @@
 import { EXPENSE_CATEGORY_LIST, VENDOR_CATEGORY_GUIDANCE } from "./vendor-rules";
 import { EXPENSE_CATEGORIES } from "../config/categories";
+import { HOUSEHOLD } from "../config/household";
 
 describe("EXPENSE_CATEGORY_LIST", () => {
   it("includes the new household categories", () => {
     expect(EXPENSE_CATEGORY_LIST).toContain("Groceries");
     expect(EXPENSE_CATEGORY_LIST).toContain("Maintenance");
+    // Household-specific categories come from household.config(.example).json
     expect(EXPENSE_CATEGORY_LIST).toContain("Arjun's Parents' Expense");
     expect(EXPENSE_CATEGORY_LIST).toContain("Priya's Parents' Expense");
   });
@@ -38,14 +40,14 @@ describe("VENDOR_CATEGORY_GUIDANCE", () => {
   });
 
   it("routes named-payee transfers to expense categories, not internal_transfer", () => {
+    for (const rule of HOUSEHOLD.payeeRules) {
+      for (const payee of rule.payees) expect(VENDOR_CATEGORY_GUIDANCE).toContain(payee);
+      expect(VENDOR_CATEGORY_GUIDANCE).toContain(`"${rule.category}"`);
+    }
     expect(VENDOR_CATEGORY_GUIDANCE).toContain("Vikram Rao");
-    expect(VENDOR_CATEGORY_GUIDANCE).toContain("Green Meadows Residency");
-    expect(VENDOR_CATEGORY_GUIDANCE).toContain("MyGate");
-    expect(VENDOR_CATEGORY_GUIDANCE).toContain("Sunita Mehta");
-    expect(VENDOR_CATEGORY_GUIDANCE).toContain("Arjun's Parents' Expense");
-    expect(VENDOR_CATEGORY_GUIDANCE).toContain("Rajesh Kapoor");
-    expect(VENDOR_CATEGORY_GUIDANCE).toContain("Neeta Kapoor");
-    expect(VENDOR_CATEGORY_GUIDANCE).toContain("Priya's Parents' Expense");
+    expect(VENDOR_CATEGORY_GUIDANCE).toMatch(
+      /"Vikram Rao" → category "Rent" \(rowType "expense"\)/,
+    );
   });
 
   it("instructs refunds to be classified as income, not expense", () => {

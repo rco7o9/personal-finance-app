@@ -2,6 +2,9 @@
 .env
 *.local
 
+# Household-specific config (real names, payees, employer) — see agents/household.config.example.json
+agents/household.config.json
+
 # Dependencies
 node_modules/
 backend/node_modules/
@@ -43,3 +46,7 @@ investments_seed_data/
 
 #agent test files
 test_files/
+# Personal dev notes / agent planning files (contain real portfolio figures) — local only
+.claude/notes/
+tasks/
+plans/

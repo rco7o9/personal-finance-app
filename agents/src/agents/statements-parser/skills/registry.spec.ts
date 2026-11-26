@@ -2,9 +2,7 @@ import { getSkill, getSupportedPlatforms } from "./registry";
 
 describe("getSkill", () => {
   it("throws for unknown platform with supported list in message", () => {
-    expect(() => getSkill("groww")).toThrow(
-      'No skill registered for platform "groww". Supported:',
-    );
+    expect(() => getSkill("groww")).toThrow('No skill registered for platform "groww". Supported:');
   });
 
   it("supported list message contains known platform ids", () => {
@@ -25,8 +23,10 @@ describe("getSupportedPlatforms", () => {
 
   it("includes all 6 required platforms", () => {
     const platforms = getSupportedPlatforms();
-    ["zerodha", "indmoney", "coinswitch", "paytm-money", "employer-stock", "hdfc-bank"].forEach((p) => {
-      expect(platforms).toContain(p);
-    });
+    ["zerodha", "indmoney", "coinswitch", "paytm-money", "employer-stock", "hdfc-bank"].forEach(
+      (p) => {
+        expect(platforms).toContain(p);
+      },
+    );
   });
 });

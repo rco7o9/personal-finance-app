@@ -1,9 +1,24 @@
 import { EXPENSE_CLASSIFIABLE_CATEGORIES } from "../config/categories";
+import { HOUSEHOLD } from "../config/household";
 
 // Single source of truth for the category enum line embedded in every expense
 // parsing prompt (hdfc-bank, icici-bank, hdfc-credit-card) — keeps the three
 // prompts from drifting out of sync with each other or with config/categories.ts.
 export const EXPENSE_CATEGORY_LIST = EXPENSE_CLASSIFIABLE_CATEGORIES.join(", ");
+
+// Named-payee rules (landlord, housing society, family members outside the household)
+// are personal, so they come from household.config.json rather than being hardcoded.
+// They are always rowType "expense", never internal_transfer/household_member.
+function renderPayeeRule(rule: { payees: string[]; category: string; note?: string }): string {
+  const payees = rule.payees.map((p) => `"${p}"`).join(" or ");
+  const reason = rule.note ? ` — ${rule.note}` : "";
+  return (
+    `  - A transfer/UPI/NEFT/IMPS to ${payees} → category "${rule.category}" ` +
+    `(rowType "expense"). Do NOT tag it "internal_transfer" / "household_member"${reason}.`
+  );
+}
+
+const PAYEE_RULES = HOUSEHOLD.payeeRules.map(renderPayeeRule).join("\n");
 
 // Household-specific vendor/merchant and named-payee categorization rules, shared
 // verbatim across every expense-parsing skill (bank and credit card alike) so the
@@ -21,17 +36,7 @@ number alone:
   - Airtel or Jio → "Utilities"
   - Amazon, Myntra, Nykaa, or another recognizable online or offline retail store → "Shopping"
   - Zepto, Blinkit, Instamart, or Handpickd → "Groceries"
-  - A transfer/UPI/NEFT/IMPS to "Vikram Rao" → "Rent". Classify this as rowType
-    "expense" with category "Rent" — do NOT tag it "internal_transfer" /
-    "household_member"; Vikram Rao is a landlord, not a household member.
-  - A transfer/UPI/NEFT/IMPS to "Green Meadows Residency" or "MyGate" → "Maintenance"
-    (rowType "expense")
-  - A transfer/UPI/NEFT/IMPS to "Sunita Mehta" → category "Arjun's Parents' Expense"
-    (rowType "expense"). Do NOT tag it "internal_transfer" / "household_member" —
-    Sunita Mehta is Arjun's parent, not a household member.
-  - A transfer/UPI/NEFT/IMPS to "Rajesh Kapoor" or "Neeta Kapoor" → category
-    "Priya's Parents' Expense" (rowType "expense"), for the same reason —
-    Priya's parents, not a household member.
+${PAYEE_RULES}
 
 Refunds: a transaction whose narration contains "REFUND" (e.g. "GLOBAL BLUE
 REFUND") is money credited BACK to the account or card, not new spend — even

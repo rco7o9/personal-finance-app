@@ -1,6 +1,6 @@
 -- Up Migration
 -- 1. Add amount_inr column to investment_transaction (nullable; seed-amount-inr.ts will backfill and set NOT NULL)
--- 2. Insert missing holding records for any asset with confirmed transactions but no holding row (ACME)
+-- 2. Insert missing holding records for any asset with confirmed transactions but no holding row
 -- 3. Re-route SGB assets to gold_api / XAU (SGBs are not indexed by Indian Stock Market API)
 -- 4. Fix 7 BSE-listed stocks whose ticker_symbol has the wrong .NS suffix
 

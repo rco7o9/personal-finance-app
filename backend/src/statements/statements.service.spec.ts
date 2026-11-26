@@ -354,7 +354,7 @@ describe("StatementsService", () => {
         type: "expense",
         platform: "hdfc-credit-card",
         format: "pdf",
-        personId: 1, // uploader selected Arjun
+        personId: 1, // uploader selected the primary member
       });
     }
 

@@ -1,5 +1,11 @@
 import type { SkillTemplate } from "../../types";
 import { EXPENSE_CATEGORY_LIST, VENDOR_CATEGORY_GUIDANCE } from "../vendor-rules";
+import {
+  FAMILY_PAYEE_RULES,
+  MEMBER_NAMES_SENTENCE,
+  PRIMARY_MEMBER,
+  SECONDARY_MEMBER,
+} from "../../config/household";
 
 const systemPromptTemplate = `You are a bank statement parser for HDFC Bank account statements.
 
@@ -26,10 +32,10 @@ For each transaction row, extract:
       Recognize patterns like "CREDIT CARD PAYMENT", "AUTOPAY", "CC XXXX1234",
       "BILLDESK", card network names combined with "PAYMENT" in the narration.
     "household_member" — the counterparty is a named household member OTHER than
-      the statement holder (this household has two members: Arjun and Priya).
+      the statement holder (household members: ${MEMBER_NAMES_SENTENCE}).
       Match by the member's name appearing in the UPI/NEFT/IMPS narration text —
       do not try to infer this from account numbers, which you cannot see reliably.
-      Example patterns: "UPI-PRIYA...", "NEFT TO ARJUN MEHTA...".
+      Example patterns: "UPI-${SECONDARY_MEMBER.statementName}...", "NEFT TO ${PRIMARY_MEMBER.statementName}...".
     "investment_platform" — a SIP mandate or broker debit going to a known
       investment platform or AMC (e.g. Zerodha, mutual fund house names, "SIP",
       "ACH DEBIT" toward a fund house). This spend is already captured through the
@@ -100,10 +106,10 @@ export const hdfcBankSkill: SkillTemplate = {
       },
     },
     {
-      sourceText: "22/01/2024  UPI-PRIYA MEHTA-Q3487561  12000.00  -  27,990.15",
+      sourceText: `22/01/2024  UPI-${SECONDARY_MEMBER.statementName}-Q3487561  12000.00  -  27,990.15`,
       parsed: {
         date: "2024-01-22",
-        description: "UPI-PRIYA MEHTA-Q3487561",
+        description: `UPI-${SECONDARY_MEMBER.statementName}-Q3487561`,
         amount: 12000,
         type: "debit",
         rowType: "internal_transfer",
@@ -182,30 +188,30 @@ export const hdfcBankSkill: SkillTemplate = {
         confidence: 0.97,
       },
     },
-    {
-      sourceText: "04/02/2024  UPI-SUNITA MEHTA-S6612938  15000.00  -  38,101.15",
+    ...FAMILY_PAYEE_RULES.slice(0, 1).map((rule) => ({
+      sourceText: `04/02/2024  UPI-${rule.payees[0].toUpperCase()}-S6612938  15000.00  -  38,101.15`,
       parsed: {
         date: "2024-02-04",
-        description: "UPI-SUNITA MEHTA-S6612938",
+        description: `UPI-${rule.payees[0].toUpperCase()}-S6612938`,
         amount: 15000,
-        type: "debit",
-        rowType: "expense",
-        category: "Arjun's Parents' Expense",
+        type: "debit" as const,
+        rowType: "expense" as const,
+        category: rule.category,
         confidence: 0.95,
       },
-    },
-    {
-      sourceText: "05/02/2024  UPI-RAJESH KAPOOR-D2287561  10000.00  -  28,101.15",
+    })),
+    ...FAMILY_PAYEE_RULES.slice(1, 2).map((rule) => ({
+      sourceText: `05/02/2024  UPI-${rule.payees[0].toUpperCase()}-D2287561  10000.00  -  28,101.15`,
       parsed: {
         date: "2024-02-05",
-        description: "UPI-RAJESH KAPOOR-D2287561",
+        description: `UPI-${rule.payees[0].toUpperCase()}-D2287561`,
         amount: 10000,
-        type: "debit",
-        rowType: "expense",
-        category: "Priya's Parents' Expense",
+        type: "debit" as const,
+        rowType: "expense" as const,
+        category: rule.category,
         confidence: 0.95,
       },
-    },
+    })),
     {
       sourceText: "06/02/2024  GLOBAL BLUE REFUND-TAX REFUND  4200.00  +  32,301.15",
       parsed: {

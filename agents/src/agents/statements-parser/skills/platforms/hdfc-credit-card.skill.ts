@@ -1,12 +1,16 @@
 import type { SkillTemplate } from "../../types";
 import { EXPENSE_CATEGORY_LIST, VENDOR_CATEGORY_GUIDANCE } from "../vendor-rules";
+import { PRIMARY_MEMBER, SECONDARY_MEMBER } from "../../config/household";
+
+const PRIMARY = PRIMARY_MEMBER.statementName;
+const ADD_ON = SECONDARY_MEMBER.statementName;
 
 const systemPromptTemplate = `You are a credit card statement parser for HDFC Bank credit card statements.
 
 This statement covers ONE credit card account shared by a primary cardholder and an
-add-on cardholder — Arjun (primary) and Priya (add-on). Transactions from both
+add-on cardholder — ${PRIMARY_MEMBER.name} (primary) and ${SECONDARY_MEMBER.name} (add-on). Transactions from both
 cards appear in the same statement, usually grouped under a section or header
-printed with the cardholder's name (e.g. "Domestic Transactions — ARJUN MEHTA" or
+printed with the cardholder's name (e.g. "Domestic Transactions — ${PRIMARY}" or
 a per-line cardholder label). You MUST capture whose transaction each row is.
 
 Extract the previous/opening balance, the new/closing balance, and EVERY
@@ -18,7 +22,7 @@ For each transaction row, extract:
 - amount: absolute value of the transaction amount (always positive)
 - type: "debit" for purchases/charges, "credit" for refunds/payments received
 - cardHolderName: the cardholder name printed against this transaction's section
-  or line — copy it verbatim (e.g. "ARJUN MEHTA", "PRIYA MEHTA"). If the
+  or line — copy it verbatim (e.g. "${PRIMARY}", "${ADD_ON}"). If the
   statement does not separate cardholders at all, omit this field rather than
   guessing.
 - rowType: classify as one of:
@@ -72,7 +76,7 @@ export const hdfcCreditCardSkill: SkillTemplate = {
   systemPromptTemplate,
   fewShotExamples: [
     {
-      sourceText: "12/01/2024  AMAZON.COM*AMZN  ARJUN MEHTA  2,499.00",
+      sourceText: `12/01/2024  AMAZON.COM*AMZN  ${PRIMARY}  2,499.00`,
       parsed: {
         date: "2024-01-12",
         description: "AMAZON.COM*AMZN",
@@ -80,12 +84,12 @@ export const hdfcCreditCardSkill: SkillTemplate = {
         type: "debit",
         rowType: "expense",
         category: "Shopping",
-        cardHolderName: "ARJUN MEHTA",
+        cardHolderName: PRIMARY,
         confidence: 0.97,
       },
     },
     {
-      sourceText: "14/01/2024  ZARA INDIA  PRIYA MEHTA  4,850.00",
+      sourceText: `14/01/2024  ZARA INDIA  ${ADD_ON}  4,850.00`,
       parsed: {
         date: "2024-01-14",
         description: "ZARA INDIA",
@@ -93,12 +97,12 @@ export const hdfcCreditCardSkill: SkillTemplate = {
         type: "debit",
         rowType: "expense",
         category: "Shopping",
-        cardHolderName: "PRIYA MEHTA",
+        cardHolderName: ADD_ON,
         confidence: 0.96,
       },
     },
     {
-      sourceText: "16/01/2024  POS 449182  ARJUN MEHTA  650.00",
+      sourceText: `16/01/2024  POS 449182  ${PRIMARY}  650.00`,
       parsed: {
         date: "2024-01-16",
         description: "POS 449182",
@@ -106,7 +110,7 @@ export const hdfcCreditCardSkill: SkillTemplate = {
         type: "debit",
         rowType: "expense",
         category: "Other",
-        cardHolderName: "ARJUN MEHTA",
+        cardHolderName: PRIMARY,
         confidence: 0.55,
       },
     },
@@ -123,7 +127,7 @@ export const hdfcCreditCardSkill: SkillTemplate = {
       },
     },
     {
-      sourceText: "22/01/2024  SWIGGY  ARJUN MEHTA  680.00",
+      sourceText: `22/01/2024  SWIGGY  ${PRIMARY}  680.00`,
       parsed: {
         date: "2024-01-22",
         description: "SWIGGY",
@@ -131,12 +135,12 @@ export const hdfcCreditCardSkill: SkillTemplate = {
         type: "debit",
         rowType: "expense",
         category: "Food & Dining",
-        cardHolderName: "ARJUN MEHTA",
+        cardHolderName: PRIMARY,
         confidence: 0.97,
       },
     },
     {
-      sourceText: "23/01/2024  UBER TRIP HELP.UBER.COM  PRIYA MEHTA  310.00",
+      sourceText: `23/01/2024  UBER TRIP HELP.UBER.COM  ${ADD_ON}  310.00`,
       parsed: {
         date: "2024-01-23",
         description: "UBER TRIP HELP.UBER.COM",
@@ -144,12 +148,12 @@ export const hdfcCreditCardSkill: SkillTemplate = {
         type: "debit",
         rowType: "expense",
         category: "Transportation",
-        cardHolderName: "PRIYA MEHTA",
+        cardHolderName: ADD_ON,
         confidence: 0.97,
       },
     },
     {
-      sourceText: "24/01/2024  BLINKIT  ARJUN MEHTA  920.00",
+      sourceText: `24/01/2024  BLINKIT  ${PRIMARY}  920.00`,
       parsed: {
         date: "2024-01-24",
         description: "BLINKIT",
@@ -157,7 +161,7 @@ export const hdfcCreditCardSkill: SkillTemplate = {
         type: "debit",
         rowType: "expense",
         category: "Groceries",
-        cardHolderName: "ARJUN MEHTA",
+        cardHolderName: PRIMARY,
         confidence: 0.97,
       },
     },
@@ -165,14 +169,14 @@ export const hdfcCreditCardSkill: SkillTemplate = {
       // A tax refund credited back to the card mid-statement — must NOT be
       // classified as "expense" just because most other rows on a credit card
       // statement are purchases. See "Refunds" guidance below.
-      sourceText: "26/01/2024  GLOBAL BLUE REFUND  ARJUN MEHTA  2,150.00 CR",
+      sourceText: `26/01/2024  GLOBAL BLUE REFUND  ${PRIMARY}  2,150.00 CR`,
       parsed: {
         date: "2024-01-26",
         description: "GLOBAL BLUE REFUND",
         amount: 2150,
         type: "credit",
         rowType: "income",
-        cardHolderName: "ARJUN MEHTA",
+        cardHolderName: PRIMARY,
         confidence: 0.94,
       },
     },

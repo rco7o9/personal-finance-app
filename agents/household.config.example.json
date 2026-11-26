@@ -1,0 +1,33 @@
+{
+  "_comment": "Copy to household.config.json (gitignored) and replace with your own household. Every name here is fictional.",
+  "members": [
+    { "name": "Arjun", "statementName": "ARJUN MEHTA", "cardRole": "primary" },
+    { "name": "Priya", "statementName": "PRIYA MEHTA", "cardRole": "add-on" }
+  ],
+  "payeeRules": [
+    {
+      "payees": ["Vikram Rao"],
+      "category": "Rent",
+      "note": "landlord, not a household member"
+    },
+    {
+      "payees": ["Green Meadows Residency", "MyGate"],
+      "category": "Maintenance",
+      "note": "housing society maintenance"
+    },
+    {
+      "payees": ["Sunita Mehta"],
+      "category": "Arjun's Parents' Expense",
+      "note": "Arjun's parent, not a household member"
+    },
+    {
+      "payees": ["Rajesh Kapoor", "Neeta Kapoor"],
+      "category": "Priya's Parents' Expense",
+      "note": "Priya's parents, not household members"
+    }
+  ],
+  "employerStock": {
+    "displayName": "Employer RSU",
+    "assetName": "Acme Corp, Inc."
+  }
+}

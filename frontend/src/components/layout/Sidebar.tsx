@@ -35,7 +35,7 @@ export function Sidebar() {
     <aside className="bg-sidebar flex h-full w-56 flex-col border-r px-3 py-4">
       <div className="mb-6 px-2">
         <h1 className="text-lg font-semibold tracking-tight">Finance Tracker</h1>
-        <p className="text-muted-foreground text-xs">Arjun & Priya</p>
+        <p className="text-muted-foreground text-xs">Household finances</p>
       </div>
 
       <nav className="flex flex-col gap-1">

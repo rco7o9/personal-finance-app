@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { apiPostForm, apiPatch } from "@/lib/api";
-import { CATEGORY_BADGE, DEFAULT_BADGE } from "@/lib/categoryBadges";
+import { badgeFor } from "@/lib/categoryBadges";
 import type { PendingTransaction, UploadResponse } from "@/types";
 
 const INVESTMENT_PLATFORMS = [
@@ -15,7 +15,7 @@ const INVESTMENT_PLATFORMS = [
   { value: "indmoney", label: "INDMoney" },
   { value: "coinswitch", label: "CoinSwitch" },
   { value: "paytm-money", label: "PayTM Money" },
-  { value: "employer-stock", label: "Employer stock" },
+  { value: "employer-stock", label: "Employer stock (RSU/ESPP)" },
 ];
 
 const EXPENSE_PLATFORMS = [
@@ -449,7 +449,7 @@ function ReviewRow({ row, onConfirm, onReject, onEdit, onSaveEdit }: ReviewRowPr
       <td className="text-muted-foreground py-3 pr-4">{row.platform}</td>
       <td className="text-muted-foreground py-3 pr-4">{row.personName}</td>
       <td className="py-3 pr-4">
-        <Badge className={cn("border text-xs", CATEGORY_BADGE[row.categoryName] ?? DEFAULT_BADGE)}>
+        <Badge className={cn("border text-xs", badgeFor(row.categoryName))}>
           {row.categoryName}
         </Badge>
       </td>

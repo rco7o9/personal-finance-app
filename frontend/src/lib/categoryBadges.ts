@@ -23,11 +23,24 @@ export const CATEGORY_BADGE: Record<string, string> = {
   Maintenance: "bg-stone-500/20 text-stone-300 border-stone-400/30",
   Insurance: "bg-teal-500/20 text-teal-300 border-teal-400/30",
   Investments: "bg-blue-500/20 text-blue-300 border-blue-400/30",
-  "Arjun's Parents' Expense": "bg-rose-500/20 text-rose-300 border-rose-400/30",
-  "Priya's Parents' Expense": "bg-purple-500/20 text-purple-300 border-purple-400/30",
   Salary: "bg-green-500/20 text-green-300 border-green-400/30",
   Transfer: "bg-slate-500/20 text-slate-300 border-slate-400/30",
   Other: "bg-zinc-500/20 text-zinc-300 border-zinc-400/30",
 };
 
 export const DEFAULT_BADGE = "bg-secondary text-secondary-foreground";
+
+// Household-specific categories (configured in agents/household.config.json) aren't
+// listed above, so they are matched by pattern instead of exact name.
+const PATTERN_BADGES: [RegExp, string][] = [
+  [/RSU$/i, "bg-orange-500/20 text-orange-300 border-orange-400/30"],
+  [/parents'? expense$/i, "bg-rose-500/20 text-rose-300 border-rose-400/30"],
+];
+
+export function badgeFor(category: string): string {
+  return (
+    CATEGORY_BADGE[category] ??
+    PATTERN_BADGES.find(([re]) => re.test(category))?.[1] ??
+    DEFAULT_BADGE
+  );
+}

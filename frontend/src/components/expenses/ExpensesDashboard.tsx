@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { apiGet } from "@/lib/api";
 import { formatCurrency, formatCurrencyShort, formatDate } from "@/lib/formatters";
-import { CATEGORY_BADGE, DEFAULT_BADGE } from "@/lib/categoryBadges";
+import { badgeFor } from "@/lib/categoryBadges";
 import type { ExpenseCategorySummary, ExpenseDetailRow, ExpenseSummary } from "@/types";
 
 interface Props {
@@ -86,9 +86,7 @@ export function ExpensesDashboard({ summary, personId, startDate, endDate, range
                 : "hover:bg-muted/40",
             )}
           >
-            <Badge
-              className={cn("border text-xs", CATEGORY_BADGE[c.categoryName] ?? DEFAULT_BADGE)}
-            >
+            <Badge className={cn("border text-xs", badgeFor(c.categoryName))}>
               {c.categoryName}
             </Badge>
             <p className="mt-3 text-2xl font-semibold tracking-tight">
@@ -109,12 +107,7 @@ export function ExpensesDashboard({ summary, personId, startDate, endDate, range
         <div className="rounded-xl border">
           <div className="flex items-center justify-between border-b px-6 py-4">
             <div className="flex items-center gap-2">
-              <Badge
-                className={cn(
-                  "border text-xs",
-                  CATEGORY_BADGE[selected.categoryName] ?? DEFAULT_BADGE,
-                )}
-              >
+              <Badge className={cn("border text-xs", badgeFor(selected.categoryName))}>
                 {selected.categoryName}
               </Badge>
               <h3 className="text-sm font-semibold">{formatCurrencyShort(selected.total)}</h3>
